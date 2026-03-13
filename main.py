@@ -13,6 +13,8 @@ from commands.cadastrar_command import execute_cadastrar_command
 from commands.inout_command import execute_inout_command
 from commands.jkp_command import execute_jkp_command
 from commands.action_command import execute_action_command
+from commands.txt_command import execute_txt_command
+from commands.adm_new_txt_command import execute_adm_new_txt_command
 
 RESTRICTED_CHANNEL_NAME = "check-in"
 ALLOWED_ROLE_NAME = "Narrador"
@@ -184,6 +186,36 @@ async def start_error(interaction: discord.Interaction, error):
         await interaction.followup.send(msg, ephemeral=True)
     else:
         await interaction.response.send_message(msg, ephemeral=True)
+
+
+# @bot.tree.command(
+#     name="txt",
+#     description="Localiza ou cria o canal privado de texto do personagem",
+#     guild=TEST_GUILD,
+# )
+# @app_commands.guild_only()
+# async def txt(interaction: discord.Interaction):
+#     await execute_txt_command(interaction)
+
+
+# @txt.error
+# async def txt_error(interaction: discord.Interaction, error):
+#     logger.exception("Erro no comando /txt: %s", error)
+
+#     msg = f"Erro ao executar /txt: {error}"
+
+#     if interaction.response.is_done():
+#         await interaction.followup.send(msg, ephemeral=True)
+#     else:
+#         await interaction.response.send_message(msg, ephemeral=True)
+
+
+@bot.tree.command(
+    name="adm_new_txt", description="Comando administrativo", guild=TEST_GUILD
+)
+@app_commands.describe(member="Selecione uma pessoa do servidor")
+async def adm_new_txt(interaction: discord.Interaction, member: discord.Member):
+    await execute_adm_new_txt_command(interaction, member)
 
 
 @bot.event
