@@ -92,22 +92,19 @@ async def cls_all_error(interaction: discord.Interaction, error):
 
 @bot.tree.command(
     name="email",
-    description="Envia todo o histórico do canal por e-mail",
+    description="Envia o histórico do canal para os jogadores presentes no canal",
     guild=TEST_GUILD,
 )
-@app_commands.checks.has_permissions(manage_messages=True)
 @app_commands.guild_only()
-async def email(interaction: discord.Interaction):
+async def email_command(interaction: discord.Interaction):
     await execute_email_command(interaction)
 
 
-@email.error
+@email_command.error
 async def email_error(interaction: discord.Interaction, error):
     logger.exception("Erro no comando /email: %s", error)
 
-    msg = "Você não tem permissão para usar este comando."
-    if not isinstance(error, app_commands.errors.MissingPermissions):
-        msg = f"Erro ao executar /email: {error}"
+    msg = f"Erro ao executar /email: {error}"
 
     if interaction.response.is_done():
         await interaction.followup.send(msg, ephemeral=True)
