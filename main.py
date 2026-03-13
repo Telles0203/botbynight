@@ -188,26 +188,38 @@ async def start_error(interaction: discord.Interaction, error):
         await interaction.response.send_message(msg, ephemeral=True)
 
 
-# @bot.tree.command(
-#     name="txt",
-#     description="Localiza ou cria o canal privado de texto do personagem",
-#     guild=TEST_GUILD,
-# )
-# @app_commands.guild_only()
-# async def txt(interaction: discord.Interaction):
-#     await execute_txt_command(interaction)
+@bot.tree.command(
+    name="txt",
+    description="Envia uma mensagem de texto para um ou mais jogadores",
+    guild=TEST_GUILD,
+)
+@app_commands.guild_only()
+async def txt(
+    interaction: discord.Interaction,
+    jogador1: discord.Member,
+    jogador2: discord.Member | None = None,
+    jogador3: discord.Member | None = None,
+    jogador4: discord.Member | None = None,
+    jogador5: discord.Member | None = None,
+):
+    jogadores = [
+        jogador
+        for jogador in [jogador1, jogador2, jogador3, jogador4, jogador5]
+        if jogador is not None
+    ]
+    await execute_txt_command(interaction, jogadores)
 
 
-# @txt.error
-# async def txt_error(interaction: discord.Interaction, error):
-#     logger.exception("Erro no comando /txt: %s", error)
+@txt.error
+async def txt_error(interaction: discord.Interaction, error):
+    logger.exception("Erro no comando /txt: %s", error)
 
-#     msg = f"Erro ao executar /txt: {error}"
+    msg = f"Erro ao executar /txt: {error}"
 
-#     if interaction.response.is_done():
-#         await interaction.followup.send(msg, ephemeral=True)
-#     else:
-#         await interaction.response.send_message(msg, ephemeral=True)
+    if interaction.response.is_done():
+        await interaction.followup.send(msg, ephemeral=True)
+    else:
+        await interaction.response.send_message(msg, ephemeral=True)
 
 
 @bot.tree.command(
