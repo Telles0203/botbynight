@@ -509,18 +509,29 @@ class SceneInviteView(View):
                     current_guest_ids,
                 )
 
-            await guest_scene_channel.send(f"{invited.mention} você entrou nesta cena.")
+            display_name = character_name or invited.display_name
+            entry_text = f"{display_name} entrou na cena."
+
+            await guest_scene_channel.send(entry_text)
 
             try:
-                await inviter_scene_channel.send(
-                    f"{inviter.mention} {invited.mention} aceitou o convite para a cena."
-                )
+                await inviter_scene_channel.send(entry_text)
             except Exception as e:
                 logger.warning(
-                    "Não foi possível avisar no canal original da cena %s: %s",
+                    "Não foi possível avisar entrada no canal original da cena %s: %s",
                     inviter_scene_channel.id,
                     e,
                 )
+
+            if inviter_action_channel is not None:
+                try:
+                    await inviter_action_channel.send(entry_text)
+                except Exception as e:
+                    logger.warning(
+                        "Não foi possível avisar entrada no canal de ações %s: %s",
+                        inviter_action_channel.id,
+                        e,
+                    )
 
             PENDING_SCENE_INVITES.pop(self.invite_id, None)
 

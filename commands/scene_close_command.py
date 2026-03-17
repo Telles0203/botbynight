@@ -267,6 +267,11 @@ async def execute_scene_close_command(interaction: discord.Interaction):
             channels_to_close = [current_channel]
             email_target_channel = current_channel
 
+            main_channel = (
+                get_main_channel_for_owner(guild, current_scene_owner)
+                if current_scene_owner is not None
+                else None
+            )
             action_channel = (
                 get_action_channel_for_owner(guild, current_scene_owner)
                 if current_scene_owner is not None
@@ -274,6 +279,8 @@ async def execute_scene_close_command(interaction: discord.Interaction):
             )
 
             channels_to_announce = [current_channel]
+            if main_channel is not None:
+                channels_to_announce.append(main_channel)
             if action_channel is not None:
                 channels_to_announce.append(action_channel)
 
@@ -294,17 +301,14 @@ async def execute_scene_close_command(interaction: discord.Interaction):
         if not interaction.response.is_done():
             await interaction.response.defer()
 
-        # Mensagem pública ANTES do e-mail e ANTES de fechar status/permissões
         await send_message_to_unique_channels(channels_to_announce, public_message)
 
-        # E-mail somente do canal alvo
         if email_target_channel is not None:
             await execute_email_command(
                 interaction,
                 target_channel=email_target_channel,
             )
 
-        # Fecha somente os canais permitidos para aquele ator
         for channel in channels_to_close:
             data = get_topic_data(channel)
             scene_type = str(data.get("scene_type", "")).strip().lower()
@@ -321,7 +325,6 @@ async def execute_scene_close_command(interaction: discord.Interaction):
 
             await close_topic_for_channel(channel)
 
-        # Sempre remove a role de quem executou
         in_scene_role = get_role_by_name(guild, INSCENE_ROLE_NAME)
         if in_scene_role is not None and in_scene_role in member.roles:
             await member.remove_roles(
