@@ -4,7 +4,7 @@ import smtplib
 import logging
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-
+import asyncio
 import discord
 
 logger = logging.getLogger("discord_debug")
@@ -230,9 +230,12 @@ class ConfirmEmailView(discord.ui.View):
         self, interaction: discord.Interaction, button: discord.ui.Button
     ):
         try:
+            await interaction.response.defer()
+
             recipients = [*self.player_emails, self.narration_email]
 
-            send_log_email(
+            await asyncio.to_thread(
+                send_log_email,
                 email_sender=self.email_sender,
                 email_password=self.email_password,
                 smtp_host=self.smtp_host,
@@ -246,7 +249,7 @@ class ConfirmEmailView(discord.ui.View):
                 f"- **{email}**" for email in self.player_emails
             )
 
-            await interaction.response.edit_message(
+            await interaction.edit_original_response(
                 content=(
                     "Log enviado com sucesso.\n\n"
                     f"**E-mails dos jogadores ({len(self.player_emails)}):**\n"
@@ -277,10 +280,13 @@ class ConfirmEmailView(discord.ui.View):
             if len(erro_texto) > 1500:
                 erro_texto = erro_texto[:1500] + "..."
 
-            await interaction.response.edit_message(
-                content=f"Erro ao enviar o e-mail: {erro_texto}",
-                view=None,
-            )
+            try:
+                await interaction.edit_original_response(
+                    content=f"Erro ao enviar o e-mail: {erro_texto}",
+                    view=None,
+                )
+            except Exception:
+                pass
 
     @discord.ui.button(label="Não enviar", style=discord.ButtonStyle.danger)
     async def cancel_send(

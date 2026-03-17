@@ -15,6 +15,8 @@ from commands.jkp_command import execute_jkp_command
 from commands.action_command import execute_action_command
 from commands.txt_command import execute_txt_command
 from commands.adm_new_txt_command import execute_adm_new_txt_command
+from commands.checkin_command import execute_checkin_command
+from commands.scene_create_command import execute_scene_create_command
 
 RESTRICTED_CHANNEL_NAME = "check-in"
 ALLOWED_ROLE_NAME = "Narrador"
@@ -139,26 +141,26 @@ async def cadastrar_error(interaction: discord.Interaction, error):
         await interaction.response.send_message(msg, ephemeral=True)
 
 
-@bot.tree.command(
-    name="inout",
-    description="Executa apenas no canal #check-in",
-    guild=TEST_GUILD,
-)
-@app_commands.guild_only()
-async def inout(interaction: discord.Interaction):
-    await execute_inout_command(interaction)
+# @bot.tree.command(
+#     name="inout",
+#     description="Executa apenas no canal #check-in",
+#     guild=TEST_GUILD,
+# )
+# @app_commands.guild_only()
+# async def inout(interaction: discord.Interaction):
+#     await execute_inout_command(interaction)
 
 
-@inout.error
-async def inout_error(interaction: discord.Interaction, error):
-    logger.exception("Erro no comando /inout: %s", error)
+# @inout.error
+# async def inout_error(interaction: discord.Interaction, error):
+#     logger.exception("Erro no comando /inout: %s", error)
 
-    msg = f"Erro ao executar /inout: {error}"
+#     msg = f"Erro ao executar /inout: {error}"
 
-    if interaction.response.is_done():
-        await interaction.followup.send(msg, ephemeral=True)
-    else:
-        await interaction.response.send_message(msg, ephemeral=True)
+#     if interaction.response.is_done():
+#         await interaction.followup.send(msg, ephemeral=True)
+#     else:
+#         await interaction.response.send_message(msg, ephemeral=True)
 
 
 """ @bot.command(name="jkp")
@@ -166,26 +168,26 @@ async def jkp(ctx: commands.Context):
     await execute_jkp_command(ctx) """
 
 
-@bot.tree.command(
-    name="start",
-    description="Inicia uma ação do jogador",
-    guild=TEST_GUILD,
-)
-@app_commands.guild_only()
-async def start(interaction: discord.Interaction):
-    await execute_action_command(interaction)
+# @bot.tree.command(
+#     name="start",
+#     description="Inicia uma ação do jogador",
+#     guild=TEST_GUILD,
+# )
+# @app_commands.guild_only()
+# async def start(interaction: discord.Interaction):
+#     await execute_action_command(interaction)
 
 
-@start.error
-async def start_error(interaction: discord.Interaction, error):
-    logger.exception("Erro no comando /start: %s", error)
+# @start.error
+# async def start_error(interaction: discord.Interaction, error):
+#     logger.exception("Erro no comando /start: %s", error)
 
-    msg = f"Erro ao executar /start: {error}"
+#     msg = f"Erro ao executar /start: {error}"
 
-    if interaction.response.is_done():
-        await interaction.followup.send(msg, ephemeral=True)
-    else:
-        await interaction.response.send_message(msg, ephemeral=True)
+#     if interaction.response.is_done():
+#         await interaction.followup.send(msg, ephemeral=True)
+#     else:
+#         await interaction.response.send_message(msg, ephemeral=True)
 
 
 @bot.tree.command(
@@ -228,6 +230,28 @@ async def txt_error(interaction: discord.Interaction, error):
 @app_commands.describe(member="Selecione uma pessoa do servidor")
 async def adm_new_txt(interaction: discord.Interaction, member: discord.Member):
     await execute_adm_new_txt_command(interaction, member)
+
+
+@bot.tree.command(
+    name="cena_criar",
+    description="Cria a cena individual do jogador",
+    guild=TEST_GUILD,
+)
+@app_commands.guild_only()
+async def cena_criar(interaction: discord.Interaction):
+    await execute_scene_create_command(interaction)
+
+
+@cena_criar.error
+async def cena_criar_error(interaction: discord.Interaction, error):
+    logger.exception("Erro no comando /cena_criar: %s", error)
+
+    msg = f"Erro ao executar /cena_criar: {error}"
+
+    if interaction.response.is_done():
+        await interaction.followup.send(msg, ephemeral=True)
+    else:
+        await interaction.response.send_message(msg, ephemeral=True)
 
 
 @bot.event
@@ -282,6 +306,28 @@ async def on_message(message: discord.Message):
         logger.exception("Não foi possível enviar aviso no canal check-in: %s", e)
 
     await bot.process_commands(message)
+
+
+@bot.tree.command(
+    name="check-in",
+    description="Executa o check-in completo do jogador",
+    guild=TEST_GUILD,
+)
+@app_commands.guild_only()
+async def check_in(interaction: discord.Interaction):
+    await execute_checkin_command(interaction)
+
+
+@check_in.error
+async def check_in_error(interaction: discord.Interaction, error):
+    logger.exception("Erro no comando /check-in: %s", error)
+
+    msg = f"Erro ao executar /check-in: {error}"
+
+    if interaction.response.is_done():
+        await interaction.followup.send(msg, ephemeral=True)
+    else:
+        await interaction.response.send_message(msg, ephemeral=True)
 
 
 @bot.event

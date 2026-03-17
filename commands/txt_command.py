@@ -1,5 +1,6 @@
 import logging
 import re
+import textwrap
 from datetime import datetime
 
 import discord
@@ -25,6 +26,41 @@ def get_text_channel_by_name(
         if channel.name.strip().lower() == channel_name.strip().lower():
             return channel
     return None
+
+
+def build_phone_frame(lines: list[str], width: int = 38) -> str:
+    top_bottom = "-" * (width + 4)
+    framed_lines = [top_bottom]
+
+    for line in lines:
+        raw_line = (line or "").replace("```", "")
+        sublines = raw_line.splitlines() or [""]
+
+        for subline in sublines:
+            clean_line = subline.rstrip()
+
+            if not clean_line:
+                framed_lines.append(f"| {'':<{width}} |")
+                continue
+
+            wrapped = textwrap.wrap(
+                clean_line,
+                width=width,
+                replace_whitespace=False,
+                drop_whitespace=False,
+                break_long_words=True,
+                break_on_hyphens=False,
+            )
+
+            if not wrapped:
+                framed_lines.append(f"| {'':<{width}} |")
+                continue
+
+            for piece in wrapped:
+                framed_lines.append(f"| {piece:<{width}} |")
+
+    framed_lines.append(top_bottom)
+    return "```text\n" + "\n".join(framed_lines) + "\n```"
 
 
 async def find_player_info_message_by_discord_id(
@@ -135,27 +171,6 @@ async def find_private_text_channel_for_member(
         )
 
     return text_channel, None
-
-
-def build_phone_frame(lines: list[str], width: int = 38) -> str:
-    top_bottom = "-" * (width + 2)
-    framed_lines = [top_bottom]
-
-    for line in lines:
-        clean_line = line.replace("```", "").strip()
-
-        if not clean_line:
-            framed_lines.append(f"| {'':<{width}} |")
-            continue
-
-        while len(clean_line) > width:
-            framed_lines.append(f"| {clean_line[:width]:<{width}} |")
-            clean_line = clean_line[width:]
-
-        framed_lines.append(f"| {clean_line:<{width}} |")
-
-    framed_lines.append(top_bottom)
-    return "```text\n" + "\n".join(framed_lines) + "\n```"
 
 
 class TxtConfirmView(View):
