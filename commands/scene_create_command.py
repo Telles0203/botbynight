@@ -53,6 +53,66 @@ def slugify_channel_name(name: str) -> str:
     return ascii_name
 
 
+def build_scene_topic(
+    member_id: int,
+    scene_kind: str,
+    status: str = "active",
+) -> str:
+    return f"scene_owner={member_id};scene_type={scene_kind};status={status}"
+
+
+def parse_scene_topic(topic: str | None) -> dict[str, str]:
+    if not topic:
+        return {}
+
+    result: dict[str, str] = {}
+
+    for part in topic.split(";"):
+        if "=" not in part:
+            continue
+
+        key, value = part.split("=", 1)
+        result[key.strip().lower()] = value.strip()
+
+    return result
+
+
+def is_scene_channel_for_member(
+    channel: discord.abc.GuildChannel,
+    member_id: int,
+    scene_type: str | None = None,
+    status: str = "active",
+) -> bool:
+    if not isinstance(channel, discord.TextChannel):
+        return False
+
+    data = parse_scene_topic(channel.topic)
+
+    if data.get("scene_owner") != str(member_id):
+        return False
+
+    if status and data.get("status") != status:
+        return False
+
+    if scene_type and data.get("scene_type") != scene_type:
+        return False
+
+    return True
+
+
+def find_active_scene_channels_for_member(
+    guild: discord.Guild,
+    member_id: int,
+) -> list[discord.TextChannel]:
+    found_channels: list[discord.TextChannel] = []
+
+    for channel in guild.text_channels:
+        if is_scene_channel_for_member(channel, member_id, status="active"):
+            found_channels.append(channel)
+
+    return found_channels
+
+
 async def find_player_info_message_by_discord_id(
     channel: discord.TextChannel, discord_user_id: int
 ) -> discord.Message | None:
@@ -162,6 +222,21 @@ class SceneCreateModal(Modal, title="Criar cena"):
                 )
                 return
 
+            active_scene_channels = find_active_scene_channels_for_member(
+                guild, member.id
+            )
+            if active_scene_channels:
+                channel_mentions = ", ".join(
+                    channel.mention for channel in active_scene_channels[:5]
+                )
+
+                await interaction.response.send_message(
+                    "Você já possui uma cena ativa. "
+                    f"Canais encontrados: {channel_mentions}",
+                    ephemeral=True,
+                )
+                return
+
             if any(
                 role.name.strip().lower() == INSCENE_ROLE_NAME.strip().lower()
                 for role in member.roles
@@ -223,10 +298,12 @@ class SceneCreateModal(Modal, title="Criar cena"):
 
             action_overwrites = {
                 everyone_role: discord.PermissionOverwrite(view_channel=False),
-                member: discord.PermissionOverwrite(
+                narrator_role: discord.PermissionOverwrite(
                     view_channel=True,
                     send_messages=True,
                     read_message_history=True,
+                    manage_messages=True,
+                    manage_channels=True,
                 ),
             }
 
@@ -236,6 +313,7 @@ class SceneCreateModal(Modal, title="Criar cena"):
                 name=scene_channel_name,
                 category=character_category,
                 overwrites=scene_overwrites,
+                topic=build_scene_topic(member.id, "main", "active"),
                 reason=f"Cena criada para {member.display_name}",
             )
 
@@ -243,6 +321,7 @@ class SceneCreateModal(Modal, title="Criar cena"):
                 name=action_channel_name,
                 category=ongoing_category,
                 overwrites=action_overwrites,
+                topic=build_scene_topic(member.id, "action", "active"),
                 reason=f"Canal de ações em andamento para {member.display_name}",
             )
 
@@ -255,7 +334,7 @@ class SceneCreateModal(Modal, title="Criar cena"):
                 f"{member.mention}\n"
                 "O canal da sua cena foi criado, mas ela ainda não começou. "
                 "Para facilitar ao narrador, precisamos entender alguns pontos importantes.\n"
-                "Então, para facilitar, utilize o comando /cena_descrever e preenha as perguntas.\n"
+                "Então utilize o comando /cena_descrever e preenha as perguntas.\n"
                 "Ah! É importante salientar que enquanto a cena estiver aberta, você não poderá participar de outras cenas.\n"
                 "Para encerrar a cena, utilize a qualquer momento o comando /cena_encerrar."
             )
@@ -292,6 +371,22 @@ async def execute_scene_create_command(interaction: discord.Interaction):
         if not isinstance(interaction.user, discord.Member):
             await interaction.response.send_message(
                 "Não foi possível validar suas roles no servidor.",
+                ephemeral=True,
+            )
+            return
+
+        active_scene_channels = find_active_scene_channels_for_member(
+            interaction.guild,
+            interaction.user.id,
+        )
+        if active_scene_channels:
+            channel_mentions = ", ".join(
+                channel.mention for channel in active_scene_channels[:5]
+            )
+
+            await interaction.response.send_message(
+                "Você já possui uma cena ativa. "
+                f"Canais encontrados: {channel_mentions}",
                 ephemeral=True,
             )
             return
