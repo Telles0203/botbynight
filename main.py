@@ -17,6 +17,7 @@ from commands.txt_command import execute_txt_command
 from commands.adm_new_txt_command import execute_adm_new_txt_command
 from commands.checkin_command import execute_checkin_command
 from commands.scene_create_command import execute_scene_create_command
+from commands.scene_close_command import execute_scene_close_command
 
 RESTRICTED_CHANNEL_NAME = "check-in"
 ALLOWED_ROLE_NAME = "Narrador"
@@ -247,6 +248,28 @@ async def cena_criar_error(interaction: discord.Interaction, error):
     logger.exception("Erro no comando /cena_criar: %s", error)
 
     msg = f"Erro ao executar /cena_criar: {error}"
+
+    if interaction.response.is_done():
+        await interaction.followup.send(msg, ephemeral=True)
+    else:
+        await interaction.response.send_message(msg, ephemeral=True)
+
+
+@bot.tree.command(
+    name="cena_encerrar",
+    description="Encerra a cena atual do jogador",
+    guild=TEST_GUILD,
+)
+@app_commands.guild_only()
+async def cena_encerrar(interaction: discord.Interaction):
+    await execute_scene_close_command(interaction)
+
+
+@cena_encerrar.error
+async def cena_encerrar_error(interaction: discord.Interaction, error):
+    logger.exception("Erro no comando /cena_encerrar: %s", error)
+
+    msg = f"Erro ao executar /cena_encerrar: {error}"
 
     if interaction.response.is_done():
         await interaction.followup.send(msg, ephemeral=True)

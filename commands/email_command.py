@@ -217,6 +217,13 @@ class ConfirmEmailView(discord.ui.View):
         for item in self.children:
             item.disabled = True
 
+    async def remove_message(self):
+        if self.message:
+            try:
+                await self.message.delete()
+            except Exception:
+                logger.exception("Erro ao apagar mensagem ephemeral do /email.")
+
     async def on_timeout(self):
         self.disable_all()
         if self.message:
@@ -230,7 +237,11 @@ class ConfirmEmailView(discord.ui.View):
         self, interaction: discord.Interaction, button: discord.ui.Button
     ):
         try:
-            await interaction.response.defer()
+            self.disable_all()
+            await interaction.response.edit_message(
+                content="Enviando log por e-mail...",
+                view=self,
+            )
 
             recipients = [*self.player_emails, self.narration_email]
 
@@ -243,20 +254,6 @@ class ConfirmEmailView(discord.ui.View):
                 recipients=recipients,
                 subject=self.subject,
                 body=self.body,
-            )
-
-            jogadores_texto = "\n".join(
-                f"- **{email}**" for email in self.player_emails
-            )
-
-            await interaction.edit_original_response(
-                content=(
-                    "Log enviado com sucesso.\n\n"
-                    f"**E-mails dos jogadores ({len(self.player_emails)}):**\n"
-                    f"{jogadores_texto}\n\n"
-                    f"**E-mail da narração:**\n- **{self.narration_email}**"
-                ),
-                view=None,
             )
 
             try:
@@ -273,6 +270,8 @@ class ConfirmEmailView(discord.ui.View):
                 logger.exception(
                     "Erro ao publicar aviso no canal após envio do /email."
                 )
+
+            await self.remove_message()
 
         except Exception as e:
             logger.exception("Erro ao enviar e-mail do /email: %s", e)
@@ -292,30 +291,53 @@ class ConfirmEmailView(discord.ui.View):
     async def cancel_send(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ):
-        await interaction.response.edit_message(
-            content="Envio cancelado.",
-            view=None,
-        )
+        try:
+            self.disable_all()
+            await interaction.response.edit_message(
+                content="Envio cancelado.",
+                view=self,
+            )
+            await self.remove_message()
+        except Exception:
+            logger.exception("Erro ao cancelar envio do /email.")
 
 
 async def execute_email_command(interaction: discord.Interaction):
     try:
         if interaction.guild is None:
-            await interaction.response.send_message(
-                "Esse comando só pode ser usado em servidor.",
-                ephemeral=True,
-            )
+            if interaction.response.is_done():
+                await interaction.followup.send(
+                    "Esse comando só pode ser usado em servidor.",
+                    ephemeral=True,
+                )
+            else:
+                await interaction.response.send_message(
+                    "Esse comando só pode ser usado em servidor.",
+                    ephemeral=True,
+                )
             return
 
         if interaction.channel is None:
-            await interaction.response.send_message("Canal inválido.", ephemeral=True)
+            if interaction.response.is_done():
+                await interaction.followup.send("Canal inválido.", ephemeral=True)
+            else:
+                await interaction.response.send_message(
+                    "Canal inválido.",
+                    ephemeral=True,
+                )
             return
 
         if not isinstance(interaction.channel, discord.TextChannel):
-            await interaction.response.send_message(
-                "Esse comando só funciona em canal de texto comum.",
-                ephemeral=True,
-            )
+            if interaction.response.is_done():
+                await interaction.followup.send(
+                    "Esse comando só funciona em canal de texto comum.",
+                    ephemeral=True,
+                )
+            else:
+                await interaction.response.send_message(
+                    "Esse comando só funciona em canal de texto comum.",
+                    ephemeral=True,
+                )
             return
 
         email_sender = os.getenv("EMAIL_SENDER", "")
@@ -325,13 +347,20 @@ async def execute_email_command(interaction: discord.Interaction):
         smtp_port = int(os.getenv("SMTP_PORT", "465"))
 
         if not email_sender or not email_password or not narration_email:
-            await interaction.response.send_message(
-                "As variáveis de e-mail não estão configuradas no .env.",
-                ephemeral=True,
-            )
+            if interaction.response.is_done():
+                await interaction.followup.send(
+                    "As variáveis de e-mail não estão configuradas no .env.",
+                    ephemeral=True,
+                )
+            else:
+                await interaction.response.send_message(
+                    "As variáveis de e-mail não estão configuradas no .env.",
+                    ephemeral=True,
+                )
             return
 
-        await interaction.response.defer(ephemeral=True)
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)
 
         info_players_channel = get_text_channel_by_name(
             interaction.guild,
