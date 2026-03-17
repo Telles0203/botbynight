@@ -19,6 +19,7 @@ from commands.checkin_command import execute_checkin_command
 from commands.scene_create_command import execute_scene_create_command
 from commands.scene_close_command import execute_scene_close_command
 from commands.scene_describe_command import execute_scene_describe_command
+from commands.channel_invite_command import execute_channel_invite_command
 
 RESTRICTED_CHANNEL_NAME = "check-in"
 ALLOWED_ROLE_NAME = "Narrador"
@@ -369,6 +370,31 @@ async def check_in_error(interaction: discord.Interaction, error):
     logger.exception("Erro no comando /check-in: %s", error)
 
     msg = f"Erro ao executar /check-in: {error}"
+
+    if interaction.response.is_done():
+        await interaction.followup.send(msg, ephemeral=True)
+    else:
+        await interaction.response.send_message(msg, ephemeral=True)
+
+
+@bot.tree.command(
+    name="canal_convidar",
+    description="Convida outro jogador para participar da sua cena",
+    guild=TEST_GUILD,
+)
+@app_commands.guild_only()
+async def canal_convidar(
+    interaction: discord.Interaction,
+    jogador: discord.Member,
+):
+    await execute_channel_invite_command(interaction, jogador)
+
+
+@canal_convidar.error
+async def canal_convidar_error(interaction: discord.Interaction, error):
+    logger.exception("Erro no comando /canal_convidar: %s", error)
+
+    msg = f"Erro ao executar /canal_convidar: {error}"
 
     if interaction.response.is_done():
         await interaction.followup.send(msg, ephemeral=True)
