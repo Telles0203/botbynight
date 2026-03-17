@@ -25,7 +25,7 @@ logger = logging.getLogger("discord_debug")
 INFO_PLAYERS_CHANNEL_NAME = "info-players"
 INSCENE_ROLE_NAME = "inScene"
 NARRATOR_ROLE_NAME = "Narrador"
-MAX_GUESTS_PER_SCENE = 3
+MAX_GUESTS_PER_SCENE = 10
 
 PENDING_SCENE_INVITES: dict[int, dict] = {}
 
@@ -522,20 +522,22 @@ class SceneInviteView(View):
                     e,
                 )
 
-            await self.disable_buttons()
-
-            accepted_text = (
-                "**Convite para cena**\n"
-                f"Convite aceito por {invited.mention}.\n"
-                f"Canal criado: {guest_scene_channel.mention}"
-            )
-
-            await interaction.response.edit_message(
-                content=accepted_text,
-                view=self,
-            )
-
             PENDING_SCENE_INVITES.pop(self.invite_id, None)
+
+            await interaction.response.send_message(
+                f"Convite aceito. Canal criado: {guest_scene_channel.mention}",
+                ephemeral=True,
+                delete_after=5,
+            )
+
+            try:
+                await interaction.message.delete()
+            except Exception as delete_error:
+                logger.warning(
+                    "Não foi possível apagar a mensagem do convite %s: %s",
+                    interaction.message.id if interaction.message else "desconhecida",
+                    delete_error,
+                )
 
         except Exception as e:
             logger.exception("Erro ao aceitar convite de cena: %s", e)
@@ -565,15 +567,6 @@ class SceneInviteView(View):
                 if isinstance(channel, discord.TextChannel):
                     inviter_scene_channel = channel
 
-            await self.disable_buttons()
-
-            await interaction.response.edit_message(
-                content=(
-                    "**Convite para cena**\n" f"Convite recusado por {invited_mention}."
-                ),
-                view=self,
-            )
-
             if inviter_scene_channel is not None:
                 try:
                     await inviter_scene_channel.send(
@@ -587,6 +580,21 @@ class SceneInviteView(View):
                     )
 
             PENDING_SCENE_INVITES.pop(self.invite_id, None)
+
+            await interaction.response.send_message(
+                "Convite recusado.",
+                ephemeral=True,
+                delete_after=5,
+            )
+
+            try:
+                await interaction.message.delete()
+            except Exception as delete_error:
+                logger.warning(
+                    "Não foi possível apagar a mensagem do convite %s: %s",
+                    interaction.message.id if interaction.message else "desconhecida",
+                    delete_error,
+                )
 
         except Exception as e:
             logger.exception("Erro ao recusar convite de cena: %s", e)

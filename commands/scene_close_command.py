@@ -54,7 +54,7 @@ def get_scene_and_action_channels(
     return current_channel, action_channel
 
 
-async def lock_member_in_channel(
+async def lock_member_in_main_channel(
     channel: discord.TextChannel,
     member: discord.Member,
 ):
@@ -66,7 +66,23 @@ async def lock_member_in_channel(
     await channel.set_permissions(
         member,
         overwrite=overwrite,
-        reason=f"Cena encerrada para {member.display_name}",
+        reason=f"Cena encerrada para {member.display_name} (canal principal)",
+    )
+
+
+async def hide_member_from_action_channel(
+    channel: discord.TextChannel,
+    member: discord.Member,
+):
+    overwrite = channel.overwrites_for(member)
+    overwrite.view_channel = False
+    overwrite.read_message_history = False
+    overwrite.send_messages = False
+
+    await channel.set_permissions(
+        member,
+        overwrite=overwrite,
+        reason=f"Cena encerrada para {member.display_name} (canal de ações)",
     )
 
 
@@ -130,22 +146,21 @@ async def execute_scene_close_command(interaction: discord.Interaction):
             )
             return
 
-        # Primeiro remove a role e trava os canais
-        await lock_member_in_channel(scene_channel, member)
+        # Ajusta permissões
+        await lock_member_in_main_channel(scene_channel, member)
 
         if action_channel is not None:
-            await lock_member_in_channel(action_channel, member)
+            await hide_member_from_action_channel(action_channel, member)
 
         await member.remove_roles(
             in_scene_role,
             reason="Saiu da cena via /cena_encerrar",
         )
 
-        # Primeiro avisa o jogador
         await interaction.channel.send("Cena encerrada.")
 
-        # Depois chama o fluxo do /email
-        await execute_email_command(interaction)
+        # Sempre envia o e-mail com base no canal principal da cena
+        await execute_email_command(interaction, target_channel=scene_channel)
 
     except Exception as e:
         logger.exception("Erro ao executar /cena_encerrar: %s", e)

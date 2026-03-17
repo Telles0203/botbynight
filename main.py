@@ -20,6 +20,7 @@ from commands.scene_create_command import execute_scene_create_command
 from commands.scene_close_command import execute_scene_close_command
 from commands.scene_describe_command import execute_scene_describe_command
 from commands.channel_invite_command import execute_channel_invite_command
+from commands.scene_mirror import mirror_scene_message
 
 RESTRICTED_CHANNEL_NAME = "check-in"
 ALLOWED_ROLE_NAME = "Narrador"
@@ -315,6 +316,7 @@ async def on_message(message: discord.Message):
     channel_name = message.channel.name.strip().lower()
 
     if channel_name != RESTRICTED_CHANNEL_NAME:
+        await mirror_scene_message(message)
         await bot.process_commands(message)
         return
 

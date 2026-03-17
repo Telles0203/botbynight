@@ -302,7 +302,10 @@ class ConfirmEmailView(discord.ui.View):
             logger.exception("Erro ao cancelar envio do /email.")
 
 
-async def execute_email_command(interaction: discord.Interaction):
+async def execute_email_command(
+    interaction: discord.Interaction,
+    target_channel: discord.TextChannel | None = None,
+):
     try:
         if interaction.guild is None:
             if interaction.response.is_done():
@@ -317,7 +320,9 @@ async def execute_email_command(interaction: discord.Interaction):
                 )
             return
 
-        if interaction.channel is None:
+        channel_to_process = target_channel or interaction.channel
+
+        if channel_to_process is None:
             if interaction.response.is_done():
                 await interaction.followup.send("Canal inválido.", ephemeral=True)
             else:
@@ -327,7 +332,7 @@ async def execute_email_command(interaction: discord.Interaction):
                 )
             return
 
-        if not isinstance(interaction.channel, discord.TextChannel):
+        if not isinstance(channel_to_process, discord.TextChannel):
             if interaction.response.is_done():
                 await interaction.followup.send(
                     "Esse comando só funciona em canal de texto comum.",
@@ -374,7 +379,7 @@ async def execute_email_command(interaction: discord.Interaction):
             )
             return
 
-        player_members = get_player_members_in_channel(interaction.channel)
+        player_members = get_player_members_in_channel(channel_to_process)
 
         if not player_members:
             await interaction.followup.send(
@@ -413,7 +418,7 @@ async def execute_email_command(interaction: discord.Interaction):
             return
 
         messages = []
-        async for msg in interaction.channel.history(limit=None, oldest_first=True):
+        async for msg in channel_to_process.history(limit=None, oldest_first=True):
             messages.append(msg)
 
         if not messages:
@@ -425,12 +430,12 @@ async def execute_email_command(interaction: discord.Interaction):
 
         body = build_email_body(
             guild_name=interaction.guild.name,
-            channel_name=interaction.channel.name,
+            channel_name=channel_to_process.name,
             target_members=found_members,
             messages=messages,
         )
 
-        subject = f"[CCO] Histórico completo do canal #{interaction.channel.name}"
+        subject = f"[CCO] Histórico completo do canal #{channel_to_process.name}"
 
         missing_text = ""
         if missing_members:
@@ -453,7 +458,7 @@ async def execute_email_command(interaction: discord.Interaction):
             email_password=email_password,
             smtp_host=smtp_host,
             smtp_port=smtp_port,
-            log_channel=interaction.channel,
+            log_channel=channel_to_process,
         )
 
         sent_message = await interaction.followup.send(
