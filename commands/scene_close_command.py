@@ -68,6 +68,36 @@ def get_owner_main_and_action_channels(
     return matched
 
 
+def get_owner_guest_channels(
+    guild: discord.Guild,
+    owner_id: int,
+) -> list[discord.TextChannel]:
+    matched: list[discord.TextChannel] = []
+
+    for channel in guild.text_channels:
+        if not isinstance(channel, discord.TextChannel):
+            continue
+
+        data = get_topic_data(channel)
+        if not data:
+            continue
+
+        status = str(data.get("status", "")).strip().lower()
+        if status != "active":
+            continue
+
+        scene_type = str(data.get("scene_type", "")).strip().lower()
+        scene_owner = parse_int(data.get("scene_owner"))
+
+        if scene_owner != owner_id:
+            continue
+
+        if scene_type == "guest":
+            matched.append(channel)
+
+    return matched
+
+
 def get_main_channel_for_owner(
     guild: discord.Guild,
     owner_id: int,
@@ -277,12 +307,21 @@ async def execute_scene_close_command(interaction: discord.Interaction):
                 if current_scene_owner is not None
                 else None
             )
+            guest_channels = (
+                get_owner_guest_channels(guild, current_scene_owner)
+                if current_scene_owner is not None
+                else []
+            )
 
             channels_to_announce = [current_channel]
             if main_channel is not None:
                 channels_to_announce.append(main_channel)
             if action_channel is not None:
                 channels_to_announce.append(action_channel)
+
+            for guest_channel in guest_channels:
+                if guest_channel.id != current_channel.id:
+                    channels_to_announce.append(guest_channel)
 
             public_message = (
                 f"{member.display_name} deixou a cena e não receberá mais informações."

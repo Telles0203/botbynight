@@ -30,6 +30,13 @@ MAX_GUESTS_PER_SCENE = 10
 PENDING_SCENE_INVITES: dict[int, dict] = {}
 
 
+def parse_int(value) -> int | None:
+    try:
+        return int(str(value).strip())
+    except Exception:
+        return None
+
+
 def build_scene_topic_from_dict(data: dict[str, str]) -> str:
     ordered_keys = [
         "scene_owner",
@@ -80,6 +87,43 @@ def find_scene_channels_for_member(
             action_channel = channel
 
     return scene_channel, action_channel
+
+
+def get_guest_channels_for_owner(
+    guild: discord.Guild,
+    owner_id: int,
+) -> list[discord.TextChannel]:
+    matched: list[discord.TextChannel] = []
+
+    for channel in guild.text_channels:
+        if not isinstance(channel, discord.TextChannel):
+            continue
+
+        data = parse_scene_topic(channel.topic)
+        if not data:
+            continue
+
+        status = str(data.get("status", "")).strip().lower()
+        scene_type = str(data.get("scene_type", "")).strip().lower()
+        scene_owner = data.get("scene_owner")
+
+        try:
+            scene_owner = int(str(scene_owner).strip())
+        except Exception:
+            continue
+
+        if status != "active":
+            continue
+
+        if scene_type != "guest":
+            continue
+
+        if scene_owner != owner_id:
+            continue
+
+        matched.append(channel)
+
+    return matched
 
 
 def get_scene_guest_ids(channel: discord.TextChannel | None) -> list[int]:
@@ -327,6 +371,72 @@ async def ensure_guest_scene_channel(
     return created_channel, character_name
 
 
+async def get_scene_participant_names(
+    guild: discord.Guild,
+    owner_id: int,
+    invited_member_id_to_ignore: int | None = None,
+) -> list[str]:
+    names: list[str] = []
+
+    owner_member = guild.get_member(owner_id)
+    if owner_member is not None:
+        owner_name = await get_character_name_from_info_players(guild, owner_member)
+        names.append(owner_name or owner_member.display_name)
+
+    guest_channels = get_guest_channels_for_owner(guild, owner_id)
+
+    for channel in guest_channels:
+        data = parse_scene_topic(channel.topic)
+        invited_member_id = parse_int(data.get("invited_member"))
+
+        if invited_member_id is None:
+            continue
+
+        if (
+            invited_member_id_to_ignore is not None
+            and invited_member_id == invited_member_id_to_ignore
+        ):
+            continue
+
+        guest_member = guild.get_member(invited_member_id)
+        if guest_member is None:
+            continue
+
+        guest_name = await get_character_name_from_info_players(guild, guest_member)
+        names.append(guest_name or guest_member.display_name)
+
+    unique_names: list[str] = []
+    seen: set[str] = set()
+
+    for name in names:
+        normalized = name.strip().lower()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        unique_names.append(name)
+
+    return unique_names
+
+
+def build_entry_message_for_new_member(
+    entering_name: str,
+    present_names: list[str],
+) -> str:
+    base_text = f"{entering_name} entrou na cena."
+
+    if not present_names:
+        return base_text
+
+    if len(present_names) == 1:
+        present_text = present_names[0]
+    elif len(present_names) == 2:
+        present_text = f"{present_names[0]} e {present_names[1]}"
+    else:
+        present_text = ", ".join(present_names[:-1]) + f" e {present_names[-1]}"
+
+    return f"{base_text}\nNo local encontram-se {present_text}."
+
+
 class SceneInviteView(View):
     def __init__(self, invite_id: int):
         super().__init__(timeout=86400)
@@ -359,6 +469,35 @@ class SceneInviteView(View):
         for child in self.children:
             if isinstance(child, Button):
                 child.disabled = True
+
+    async def finalize_invite_message(
+        self,
+        interaction: discord.Interaction,
+        closed_text: str,
+    ):
+        try:
+            await interaction.message.delete()
+            return
+        except Exception as e:
+            logger.warning(
+                "Não foi possível deletar a mensagem do convite %s: %s",
+                interaction.message.id if interaction.message else "desconhecida",
+                e,
+            )
+
+        try:
+            await self.disable_buttons()
+            await interaction.message.edit(
+                content=closed_text,
+                view=self,
+            )
+            return
+        except Exception as e:
+            logger.warning(
+                "Não foi possível editar a mensagem do convite %s: %s",
+                interaction.message.id if interaction.message else "desconhecida",
+                e,
+            )
 
     @discord.ui.button(label="Aceitar", style=discord.ButtonStyle.success)
     async def accept_button(self, interaction: discord.Interaction, button: Button):
@@ -510,26 +649,48 @@ class SceneInviteView(View):
                 )
 
             display_name = character_name or invited.display_name
-            entry_text = f"{display_name} entrou na cena."
+            owner_id = int(
+                parse_scene_topic(inviter_scene_channel.topic).get("scene_owner", "0")
+                or "0"
+            )
 
-            await guest_scene_channel.send(entry_text)
+            present_names = await get_scene_participant_names(
+                guild,
+                owner_id,
+                invited_member_id_to_ignore=invited.id,
+            )
+            entry_text = build_entry_message_for_new_member(
+                display_name,
+                present_names,
+            )
 
-            try:
-                await inviter_scene_channel.send(entry_text)
-            except Exception as e:
-                logger.warning(
-                    "Não foi possível avisar entrada no canal original da cena %s: %s",
-                    inviter_scene_channel.id,
-                    e,
-                )
+            channels_to_notify: list[discord.TextChannel] = [
+                guest_scene_channel,
+                inviter_scene_channel,
+            ]
 
             if inviter_action_channel is not None:
+                channels_to_notify.append(inviter_action_channel)
+
+            owner_guest_channels = get_guest_channels_for_owner(guild, owner_id)
+
+            for channel in owner_guest_channels:
+                if channel.id != guest_scene_channel.id:
+                    channels_to_notify.append(channel)
+
+            sent_channel_ids: set[int] = set()
+
+            for channel in channels_to_notify:
+                if channel.id in sent_channel_ids:
+                    continue
+
                 try:
-                    await inviter_action_channel.send(entry_text)
+                    await channel.send(entry_text)
+                    sent_channel_ids.add(channel.id)
                 except Exception as e:
                     logger.warning(
-                        "Não foi possível avisar entrada no canal de ações %s: %s",
-                        inviter_action_channel.id,
+                        "Não foi possível avisar entrada no canal %s: %s",
+                        channel.id,
                         e,
                     )
 
@@ -541,14 +702,16 @@ class SceneInviteView(View):
                 delete_after=5,
             )
 
-            try:
-                await interaction.message.delete()
-            except Exception as delete_error:
-                logger.warning(
-                    "Não foi possível apagar a mensagem do convite %s: %s",
-                    interaction.message.id if interaction.message else "desconhecida",
-                    delete_error,
-                )
+            await self.finalize_invite_message(
+                interaction,
+                (
+                    f"{invited.mention}\n"
+                    "**Convite para cena**\n"
+                    f"**Convidado por:** {inviter.mention}\n"
+                    f"**Cena:** {inviter_scene_channel.name}\n\n"
+                    "✅ Convite aceito."
+                ),
+            )
 
         except Exception as e:
             logger.exception("Erro ao aceitar convite de cena: %s", e)
@@ -572,8 +735,11 @@ class SceneInviteView(View):
             payload = self.get_payload()
             invited_mention = interaction.user.mention
 
+            inviter = None
             inviter_scene_channel = None
+
             if interaction.guild is not None and payload is not None:
+                inviter = interaction.guild.get_member(payload["inviter_id"])
                 channel = interaction.guild.get_channel(payload["scene_channel_id"])
                 if isinstance(channel, discord.TextChannel):
                     inviter_scene_channel = channel
@@ -598,14 +764,23 @@ class SceneInviteView(View):
                 delete_after=5,
             )
 
-            try:
-                await interaction.message.delete()
-            except Exception as delete_error:
-                logger.warning(
-                    "Não foi possível apagar a mensagem do convite %s: %s",
-                    interaction.message.id if interaction.message else "desconhecida",
-                    delete_error,
-                )
+            inviter_mention = inviter.mention if inviter is not None else "desconhecido"
+            scene_name = (
+                inviter_scene_channel.name
+                if inviter_scene_channel is not None
+                else "desconhecida"
+            )
+
+            await self.finalize_invite_message(
+                interaction,
+                (
+                    f"{interaction.user.mention}\n"
+                    "**Convite para cena**\n"
+                    f"**Convidado por:** {inviter_mention}\n"
+                    f"**Cena:** {scene_name}\n\n"
+                    "❌ Convite recusado."
+                ),
+            )
 
         except Exception as e:
             logger.exception("Erro ao recusar convite de cena: %s", e)
