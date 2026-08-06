@@ -2,9 +2,11 @@ import os
 import re
 import smtplib
 import logging
+import asyncio
+
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-import asyncio
+
 import discord
 
 logger = logging.getLogger("discord_debug")
@@ -16,23 +18,32 @@ NARRATOR_ROLE_NAME = "Narrador"
 
 def format_message(msg: discord.Message) -> str:
     timestamp = msg.created_at.astimezone().strftime("%d/%m/%Y %H:%M:%S")
-    author = f"{msg.author.display_name} ({msg.author.name})"
+
+    author = f"{msg.author.display_name} " f"({msg.author.name})"
+
     content = msg.content.strip() if msg.content else "[sem texto]"
 
     attachments = ""
+
     if msg.attachments:
-        attachment_lines = [f"- {a.filename}: {a.url}" for a in msg.attachments]
+        attachment_lines = [
+            f"- {attachment.filename}: {attachment.url}"
+            for attachment in msg.attachments
+        ]
+
         attachments = "\nAnexos:\n" + "\n".join(attachment_lines)
 
-    return f"[{timestamp}] {author}\n{content}{attachments}\n"
+    return f"[{timestamp}] {author}\n" f"{content}{attachments}\n"
 
 
 def get_text_channel_by_name(
-    guild: discord.Guild, channel_name: str
+    guild: discord.Guild,
+    channel_name: str,
 ) -> discord.TextChannel | None:
     for channel in guild.text_channels:
         if channel.name.strip().lower() == channel_name.strip().lower():
             return channel
+
     return None
 
 
@@ -41,17 +52,25 @@ def normalize_discord_text(text: str) -> str:
     text = text.replace("__", "")
     text = text.replace("`", "")
     text = text.replace("•", "-")
+
     return text
 
 
-def extract_player_email_from_text(text: str) -> str | None:
+def extract_player_email_from_text(
+    text: str,
+) -> str | None:
     clean_text = normalize_discord_text(text)
 
     match = re.search(
-        r"E-?mail\s+do\s+jogador\s*:\s*([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})",
+        (
+            r"E-?mail\s+do\s+jogador\s*:\s*"
+            r"([A-Za-z0-9._%+-]+@"
+            r"[A-Za-z0-9.-]+\.[A-Za-z]{2,})"
+        ),
         clean_text,
         re.IGNORECASE,
     )
+
     if match:
         return match.group(1).strip()
 
@@ -59,21 +78,26 @@ def extract_player_email_from_text(text: str) -> str | None:
 
 
 async def find_player_email_by_discord_id(
-    channel: discord.TextChannel, discord_user_id: int
+    channel: discord.TextChannel,
+    discord_user_id: int,
 ) -> str | None:
     target_id = str(discord_user_id)
 
-    async for msg in channel.history(limit=None, oldest_first=False):
+    async for msg in channel.history(
+        limit=None,
+        oldest_first=False,
+    ):
         content = msg.content or ""
         clean_content = normalize_discord_text(content)
 
         if target_id in clean_content:
             email_found = extract_player_email_from_text(clean_content)
+
             if email_found:
                 return email_found
 
         for embed in msg.embeds:
-            embed_text_parts = []
+            embed_text_parts: list[str] = []
 
             if embed.title:
                 embed_text_parts.append(embed.title)
@@ -83,34 +107,49 @@ async def find_player_email_by_discord_id(
 
             for field in embed.fields:
                 embed_text_parts.append(field.name)
+
                 embed_text_parts.append(field.value)
 
             full_embed_text = "\n".join(embed_text_parts)
+
             clean_embed_text = normalize_discord_text(full_embed_text)
 
             if target_id in clean_embed_text:
                 email_found = extract_player_email_from_text(clean_embed_text)
+
                 if email_found:
                     return email_found
 
     return None
 
 
-def member_has_role(member: discord.Member, role_name: str) -> bool:
+def member_has_role(
+    member: discord.Member,
+    role_name: str,
+) -> bool:
     return any(
         role.name.strip().lower() == role_name.strip().lower() for role in member.roles
     )
 
 
-def get_player_members_in_channel(channel: discord.TextChannel) -> list[discord.Member]:
+def get_player_members_in_channel(
+    channel: discord.TextChannel,
+) -> list[discord.Member]:
     members: list[discord.Member] = []
 
     for member in channel.members:
         if member.bot:
             continue
 
-        has_player_role = member_has_role(member, PLAYER_ROLE_NAME)
-        has_narrator_role = member_has_role(member, NARRATOR_ROLE_NAME)
+        has_player_role = member_has_role(
+            member,
+            PLAYER_ROLE_NAME,
+        )
+
+        has_narrator_role = member_has_role(
+            member,
+            NARRATOR_ROLE_NAME,
+        )
 
         if has_player_role and not has_narrator_role:
             members.append(member)
@@ -125,18 +164,18 @@ def build_email_body(
     messages: list[discord.Message],
 ) -> str:
     player_lines = [
-        f"- {member.display_name} ({member.name}) | ID: {member.id}"
+        (f"- {member.display_name} " f"({member.name}) | " f"ID: {member.id}")
         for member in target_members
     ]
 
     body_lines = [
         f"Servidor: {guild_name}",
         f"Canal: #{channel_name}",
-        "Destino: Jogadores do canal e narração",
-        f"Total de jogadores no envio: {len(target_members)}",
+        ("Destino: Jogadores do canal " "e narração"),
+        ("Total de jogadores no envio: " f"{len(target_members)}"),
         "Jogadores considerados:",
         *player_lines,
-        f"Total de mensagens: {len(messages)}",
+        ("Total de mensagens: " f"{len(messages)}"),
         "",
         "==== HISTÓRICO ====",
         "",
@@ -157,21 +196,44 @@ def send_log_email(
     subject: str,
     body: str,
 ) -> None:
-    unique_recipients = []
+    unique_recipients: list[str] = []
+
     for recipient in recipients:
         normalized = recipient.strip().lower()
+
         if normalized and normalized not in unique_recipients:
             unique_recipients.append(normalized)
 
     message = MIMEMultipart()
-    message["From"] = email_sender
-    message["To"] = ", ".join(unique_recipients)
-    message["Subject"] = subject
-    message.attach(MIMEText(body, "plain", "utf-8"))
 
-    with smtplib.SMTP_SSL(smtp_host, smtp_port) as server:
-        server.login(email_sender, email_password)
-        server.sendmail(email_sender, unique_recipients, message.as_string())
+    message["From"] = email_sender
+
+    message["To"] = ", ".join(unique_recipients)
+
+    message["Subject"] = subject
+
+    message.attach(
+        MIMEText(
+            body,
+            "plain",
+            "utf-8",
+        )
+    )
+
+    with smtplib.SMTP_SSL(
+        smtp_host,
+        smtp_port,
+    ) as server:
+        server.login(
+            email_sender,
+            email_password,
+        )
+
+        server.sendmail(
+            email_sender,
+            unique_recipients,
+            message.as_string(),
+        )
 
 
 class ConfirmEmailView(discord.ui.View):
@@ -191,6 +253,7 @@ class ConfirmEmailView(discord.ui.View):
         log_channel: discord.TextChannel,
     ):
         super().__init__(timeout=60)
+
         self.author_id = author_id
         self.target_members = target_members
         self.player_emails = player_emails
@@ -202,15 +265,21 @@ class ConfirmEmailView(discord.ui.View):
         self.smtp_host = smtp_host
         self.smtp_port = smtp_port
         self.log_channel = log_channel
+
         self.message: discord.Message | None = None
 
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+    async def interaction_check(
+        self,
+        interaction: discord.Interaction,
+    ) -> bool:
         if interaction.user.id != self.author_id:
             await interaction.response.send_message(
-                "Só quem executou o comando pode usar estes botões.",
+                ("Só quem executou o comando " "pode usar estes botões."),
                 ephemeral=True,
             )
+
             return False
+
         return True
 
     def disable_all(self):
@@ -221,34 +290,48 @@ class ConfirmEmailView(discord.ui.View):
         if self.message:
             try:
                 await self.message.delete()
+
             except Exception:
-                logger.exception("Erro ao apagar mensagem ephemeral do /email.")
+                logger.exception(("Erro ao apagar mensagem " "ephemeral do /email."))
 
     async def on_timeout(self):
         self.disable_all()
+
         if self.message:
             try:
                 await self.message.edit(view=self)
-            except Exception:
-                logger.exception("Erro ao desabilitar botões do /email no timeout.")
 
-    @discord.ui.button(label="Sim, enviar", style=discord.ButtonStyle.success)
+            except Exception:
+                logger.exception(
+                    ("Erro ao desabilitar " "botões do /email " "no timeout.")
+                )
+
+    @discord.ui.button(
+        label="Sim, enviar",
+        style=discord.ButtonStyle.success,
+    )
     async def confirm_send(
-        self, interaction: discord.Interaction, button: discord.ui.Button
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
     ):
         try:
             self.disable_all()
+
             await interaction.response.edit_message(
-                content="Enviando log por e-mail...",
+                content=("Enviando log por e-mail..."),
                 view=self,
             )
 
-            recipients = [*self.player_emails, self.narration_email]
+            recipients = [
+                *self.player_emails,
+                self.narration_email,
+            ]
 
             await asyncio.to_thread(
                 send_log_email,
                 email_sender=self.email_sender,
-                email_password=self.email_password,
+                email_password=(self.email_password),
                 smtp_host=self.smtp_host,
                 smtp_port=self.smtp_port,
                 recipients=recipients,
@@ -260,109 +343,167 @@ class ConfirmEmailView(discord.ui.View):
                 jogadores_publico = "\n".join(
                     f"- `{email}`" for email in self.player_emails
                 )
+
                 await self.log_channel.send(
-                    "📧 **Log do canal enviado.**\n\n"
-                    f"**Jogadores ({len(self.player_emails)}):**\n"
-                    f"{jogadores_publico}\n\n"
-                    f"**Narração:**\n- `{self.narration_email}`"
+                    (
+                        "📧 **Log do canal "
+                        "enviado.**\n\n"
+                        f"**Jogadores "
+                        f"({len(self.player_emails)}):**"
+                        "\n"
+                        f"{jogadores_publico}\n\n"
+                        "**Narração:**\n"
+                        f"- `{self.narration_email}`"
+                    )
                 )
+
             except Exception:
                 logger.exception(
-                    "Erro ao publicar aviso no canal após envio do /email."
+                    ("Erro ao publicar aviso " "no canal após envio " "do /email.")
                 )
 
             await self.remove_message()
 
-        except Exception as e:
-            logger.exception("Erro ao enviar e-mail do /email: %s", e)
-            erro_texto = str(e)
-            if len(erro_texto) > 1500:
-                erro_texto = erro_texto[:1500] + "..."
+        except Exception as error:
+            logger.exception(
+                ("Erro ao enviar e-mail " "do /email: %s"),
+                error,
+            )
+
+            error_text = str(error)
+
+            if len(error_text) > 1500:
+                error_text = error_text[:1500] + "..."
 
             try:
                 await interaction.edit_original_response(
-                    content=f"Erro ao enviar o e-mail: {erro_texto}",
+                    content=("Erro ao enviar " "o e-mail: " f"{error_text}"),
                     view=None,
                 )
+
             except Exception:
                 pass
 
-    @discord.ui.button(label="Não enviar", style=discord.ButtonStyle.danger)
+    @discord.ui.button(
+        label="Não enviar",
+        style=discord.ButtonStyle.danger,
+    )
     async def cancel_send(
-        self, interaction: discord.Interaction, button: discord.ui.Button
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
     ):
         try:
             self.disable_all()
+
             await interaction.response.edit_message(
                 content="Envio cancelado.",
                 view=self,
             )
+
             await self.remove_message()
+
         except Exception:
-            logger.exception("Erro ao cancelar envio do /email.")
+            logger.exception(("Erro ao cancelar " "envio do /email."))
 
 
 async def execute_email_command(
     interaction: discord.Interaction,
     target_channel: discord.TextChannel | None = None,
-):
+    automatic: bool = False,
+) -> bool:
     try:
         if interaction.guild is None:
             if interaction.response.is_done():
                 await interaction.followup.send(
-                    "Esse comando só pode ser usado em servidor.",
+                    ("Esse comando só pode " "ser usado em servidor."),
                     ephemeral=True,
                 )
+
             else:
                 await interaction.response.send_message(
-                    "Esse comando só pode ser usado em servidor.",
+                    ("Esse comando só pode " "ser usado em servidor."),
                     ephemeral=True,
                 )
-            return
+
+            return False
 
         channel_to_process = target_channel or interaction.channel
 
         if channel_to_process is None:
             if interaction.response.is_done():
-                await interaction.followup.send("Canal inválido.", ephemeral=True)
+                await interaction.followup.send(
+                    "Canal inválido.",
+                    ephemeral=True,
+                )
+
             else:
                 await interaction.response.send_message(
                     "Canal inválido.",
                     ephemeral=True,
                 )
-            return
 
-        if not isinstance(channel_to_process, discord.TextChannel):
+            return False
+
+        if not isinstance(
+            channel_to_process,
+            discord.TextChannel,
+        ):
             if interaction.response.is_done():
                 await interaction.followup.send(
-                    "Esse comando só funciona em canal de texto comum.",
+                    ("Esse comando só funciona " "em canal de texto comum."),
                     ephemeral=True,
                 )
+
             else:
                 await interaction.response.send_message(
-                    "Esse comando só funciona em canal de texto comum.",
+                    ("Esse comando só funciona " "em canal de texto comum."),
                     ephemeral=True,
                 )
-            return
 
-        email_sender = os.getenv("EMAIL_SENDER", "")
-        email_password = os.getenv("EMAIL_PASSWORD", "")
-        narration_email = os.getenv("EMAIL_RECIPIENT", "")
-        smtp_host = os.getenv("SMTP_HOST", "smtp.zoho.com")
-        smtp_port = int(os.getenv("SMTP_PORT", "465"))
+            return False
+
+        email_sender = os.getenv(
+            "EMAIL_SENDER",
+            "",
+        )
+
+        email_password = os.getenv(
+            "EMAIL_PASSWORD",
+            "",
+        )
+
+        narration_email = os.getenv(
+            "EMAIL_RECIPIENT",
+            "",
+        )
+
+        smtp_host = os.getenv(
+            "SMTP_HOST",
+            "smtp.zoho.com",
+        )
+
+        smtp_port = int(
+            os.getenv(
+                "SMTP_PORT",
+                "465",
+            )
+        )
 
         if not email_sender or not email_password or not narration_email:
             if interaction.response.is_done():
                 await interaction.followup.send(
-                    "As variáveis de e-mail não estão configuradas no .env.",
+                    ("As variáveis de e-mail " "não estão configuradas " "no .env."),
                     ephemeral=True,
                 )
+
             else:
                 await interaction.response.send_message(
-                    "As variáveis de e-mail não estão configuradas no .env.",
+                    ("As variáveis de e-mail " "não estão configuradas " "no .env."),
                     ephemeral=True,
                 )
-            return
+
+            return False
 
         if not interaction.response.is_done():
             await interaction.response.defer(ephemeral=True)
@@ -374,22 +515,30 @@ async def execute_email_command(
 
         if info_players_channel is None:
             await interaction.followup.send(
-                "Não encontrei o canal #info-players.",
+                ("Não encontrei o canal " "#info-players."),
                 ephemeral=True,
             )
-            return
+
+            return False
 
         player_members = get_player_members_in_channel(channel_to_process)
 
         if not player_members:
             await interaction.followup.send(
-                "Não encontrei membros com a role **Jogador** neste canal sem a role **Narrador**.",
+                (
+                    "Não encontrei membros com "
+                    "a role **Jogador** neste canal "
+                    "sem a role **Narrador**."
+                ),
                 ephemeral=True,
             )
-            return
+
+            return False
 
         found_emails: list[str] = []
+
         found_members: list[discord.Member] = []
+
         missing_members: list[str] = []
 
         for member in player_members:
@@ -401,52 +550,116 @@ async def execute_email_command(
             if player_email:
                 found_members.append(member)
                 found_emails.append(player_email)
+
             else:
                 missing_members.append(member.display_name)
 
         unique_emails: list[str] = []
+
         for email in found_emails:
             normalized = email.strip().lower()
+
             if normalized not in unique_emails:
                 unique_emails.append(normalized)
 
         if not unique_emails:
             await interaction.followup.send(
-                "Não encontrei e-mails dos jogadores deste canal no #info-players.",
+                (
+                    "Não encontrei e-mails dos "
+                    "jogadores deste canal no "
+                    "#info-players."
+                ),
                 ephemeral=True,
             )
-            return
 
-        messages = []
-        async for msg in channel_to_process.history(limit=None, oldest_first=True):
+            return False
+
+        messages: list[discord.Message] = []
+
+        async for msg in channel_to_process.history(
+            limit=None,
+            oldest_first=True,
+        ):
             messages.append(msg)
 
         if not messages:
             await interaction.followup.send(
-                "Não encontrei mensagens para enviar.",
+                ("Não encontrei mensagens " "para enviar."),
                 ephemeral=True,
             )
-            return
+
+            return False
 
         body = build_email_body(
             guild_name=interaction.guild.name,
-            channel_name=channel_to_process.name,
+            channel_name=(channel_to_process.name),
             target_members=found_members,
             messages=messages,
         )
 
-        subject = f"[CCO] Histórico completo do canal #{channel_to_process.name}"
+        subject = "[CCO] Histórico completo " f"do canal " f"#{channel_to_process.name}"
 
         missing_text = ""
+
         if missing_members:
             missing_lines = "\n".join(f"- {name}" for name in missing_members)
+
             missing_text = (
-                "\n\n**Jogadores sem e-mail encontrado no #info-players:**\n"
+                "\n\n"
+                "**Jogadores sem e-mail "
+                "encontrado no "
+                "#info-players:**\n"
                 f"{missing_lines}"
             )
 
         emails_preview = "\n".join(f"- **{email}**" for email in unique_emails)
 
+        # Utilizado pelo /cena_encerrar.
+        # Envia sem pedir confirmação.
+        if automatic:
+            recipients = [
+                *unique_emails,
+                narration_email,
+            ]
+
+            await asyncio.to_thread(
+                send_log_email,
+                email_sender=email_sender,
+                email_password=email_password,
+                smtp_host=smtp_host,
+                smtp_port=smtp_port,
+                recipients=recipients,
+                subject=subject,
+                body=body,
+            )
+
+            try:
+                jogadores_publico = "\n".join(f"- `{email}`" for email in unique_emails)
+
+                await channel_to_process.send(
+                    (
+                        "📧 **Log do canal "
+                        "enviado automaticamente.**"
+                        "\n\n"
+                        f"**Jogadores "
+                        f"({len(unique_emails)}):**"
+                        "\n"
+                        f"{jogadores_publico}"
+                        "\n\n"
+                        "**Narração:**\n"
+                        f"- `{narration_email}`"
+                    )
+                )
+
+            except Exception:
+                logger.exception(
+                    ("Erro ao publicar aviso " "após envio automático " "do log.")
+                )
+
+            return True
+
+        # Comportamento normal do /email:
+        # mantém os botões de confirmação.
         view = ConfirmEmailView(
             author_id=interaction.user.id,
             target_members=found_members,
@@ -463,31 +676,55 @@ async def execute_email_command(
 
         sent_message = await interaction.followup.send(
             (
-                f"Encontrei **{len(unique_emails)}** e-mail(s) de jogadores neste canal.\n\n"
-                f"**E-mails dos jogadores:**\n{emails_preview}\n\n"
-                f"**E-mail da narração:**\n- **{narration_email}**"
+                f"Encontrei "
+                f"**{len(unique_emails)}** "
+                "e-mail(s) de jogadores "
+                "neste canal.\n\n"
+                "**E-mails dos jogadores:**"
+                "\n"
+                f"{emails_preview}\n\n"
+                "**E-mail da narração:**"
+                "\n"
+                f"- **{narration_email}**"
                 f"{missing_text}\n\n"
-                "Deseja enviar o log deste canal para esses e-mails?"
+                "Deseja enviar o log deste "
+                "canal para esses e-mails?"
             ),
             ephemeral=True,
             view=view,
         )
+
         view.message = sent_message
 
-    except Exception as e:
-        logger.exception("Erro dentro do /email: %s", e)
+        return True
 
-        erro_texto = str(e)
-        if len(erro_texto) > 1500:
-            erro_texto = erro_texto[:1500] + "..."
+    except Exception as error:
+        logger.exception(
+            "Erro dentro do /email: %s",
+            error,
+        )
 
-        if interaction.response.is_done():
-            await interaction.followup.send(
-                f"Erro ao executar /email: {erro_texto}",
-                ephemeral=True,
+        error_text = str(error)
+
+        if len(error_text) > 1500:
+            error_text = error_text[:1500] + "..."
+
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(
+                    ("Erro ao executar /email: " f"{error_text}"),
+                    ephemeral=True,
+                )
+
+            else:
+                await interaction.response.send_message(
+                    ("Erro ao executar " f"/email: {error_text}"),
+                    ephemeral=True,
+                )
+
+        except Exception:
+            logger.exception(
+                ("Não foi possível enviar " "a mensagem de erro " "do /email.")
             )
-        else:
-            await interaction.response.send_message(
-                f"Erro ao executar /email: {erro_texto}",
-                ephemeral=True,
-            )
+
+        return False
