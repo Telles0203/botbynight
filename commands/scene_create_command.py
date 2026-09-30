@@ -1,6 +1,7 @@
 import logging
 import re
 import unicodedata
+import uuid
 
 import discord
 from discord.ui import Modal, TextInput
@@ -11,6 +12,7 @@ INFO_PLAYERS_CHANNEL_NAME = "info-players"
 INSCENE_ROLE_NAME = "inScene"
 NARRATOR_ROLE_NAME = "Narrador"
 ONGOING_ACTIONS_CATEGORY_NAME = "Ações em andamento"
+MAX_ACTIVE_SCENES_PER_PLAYER = 3
 
 
 def get_text_channel_by_name(
@@ -57,8 +59,18 @@ def build_scene_topic(
     member_id: int,
     scene_kind: str,
     status: str = "active",
+    scene_id: str | None = None,
 ) -> str:
-    return f"scene_owner={member_id};scene_type={scene_kind};status={status}"
+    parts = [
+        f"scene_owner={member_id}",
+        f"scene_type={scene_kind}",
+        f"status={status}",
+    ]
+
+    if scene_id:
+        parts.append(f"scene_id={scene_id}")
+
+    return ";".join(parts)
 
 
 def parse_scene_topic(topic: str | None) -> dict[str, str]:
@@ -75,6 +87,86 @@ def parse_scene_topic(topic: str | None) -> dict[str, str]:
         result[key.strip().lower()] = value.strip()
 
     return result
+
+
+def get_scene_identity_from_data(data: dict[str, str]) -> str | None:
+    scene_id = (data.get("scene_id") or "").strip()
+
+    if scene_id:
+        return f"id:{scene_id}"
+
+    # Compatibilidade com cenas antigas que não possuem scene_id.
+    owner = (data.get("scene_owner") or "").strip()
+
+    if owner:
+        return f"legacy_owner:{owner}"
+
+    return None
+
+
+def get_scene_identity(channel: discord.TextChannel) -> str | None:
+    return get_scene_identity_from_data(parse_scene_topic(channel.topic))
+
+
+def get_active_scene_identities_for_member(
+    guild: discord.Guild,
+    member_id: int,
+) -> set[str]:
+    identities: set[str] = set()
+
+    for channel in guild.text_channels:
+        if not isinstance(channel, discord.TextChannel):
+            continue
+
+        data = parse_scene_topic(channel.topic)
+
+        if str(data.get("status", "")).strip().lower() != "active":
+            continue
+
+        scene_type = str(data.get("scene_type", "")).strip().lower()
+
+        owner = str(data.get("scene_owner", "")).strip()
+
+        invited = str(data.get("invited_member", "")).strip()
+
+        participates = (
+            scene_type in {"main", "action"} and owner == str(member_id)
+        ) or (scene_type == "guest" and invited == str(member_id))
+
+        if not participates:
+            continue
+
+        identity = get_scene_identity_from_data(data)
+
+        if identity:
+            identities.add(identity)
+
+    return identities
+
+
+def count_active_scenes_for_member(
+    guild: discord.Guild,
+    member_id: int,
+) -> int:
+    return len(
+        get_active_scene_identities_for_member(
+            guild,
+            member_id,
+        )
+    )
+
+
+def member_has_active_scene(
+    guild: discord.Guild,
+    member_id: int,
+) -> bool:
+    return (
+        count_active_scenes_for_member(
+            guild,
+            member_id,
+        )
+        > 0
+    )
 
 
 def is_scene_channel_for_member(
@@ -107,14 +199,19 @@ def find_active_scene_channels_for_member(
     found_channels: list[discord.TextChannel] = []
 
     for channel in guild.text_channels:
-        if is_scene_channel_for_member(channel, member_id, status="active"):
+        if is_scene_channel_for_member(
+            channel,
+            member_id,
+            status="active",
+        ):
             found_channels.append(channel)
 
     return found_channels
 
 
 async def find_player_info_message_by_discord_id(
-    channel: discord.TextChannel, discord_user_id: int
+    channel: discord.TextChannel,
+    discord_user_id: int,
 ) -> discord.Message | None:
     target_id = str(discord_user_id)
 
@@ -123,22 +220,29 @@ async def find_player_info_message_by_discord_id(
         re.IGNORECASE,
     )
 
-    async for message in channel.history(limit=None, oldest_first=False):
+    async for message in channel.history(
+        limit=None,
+        oldest_first=False,
+    ):
         if not message.content:
             continue
 
         match = pattern.search(message.content)
+
         if not match:
             continue
 
         found_id = match.group(1)
+
         if found_id == target_id:
             return message
 
     return None
 
 
-def extract_character_name(content: str) -> str | None:
+def extract_character_name(
+    content: str,
+) -> str | None:
     if not content:
         return None
 
@@ -148,17 +252,26 @@ def extract_character_name(content: str) -> str | None:
     ]
 
     for raw_pattern in patterns:
-        pattern = re.compile(raw_pattern, re.IGNORECASE | re.MULTILINE)
+        pattern = re.compile(
+            raw_pattern,
+            re.IGNORECASE | re.MULTILINE,
+        )
+
         match = pattern.search(content)
+
         if match:
             value = match.group(1).strip()
+
             if value:
                 return value
 
     return None
 
 
-class SceneCreateModal(Modal, title="Criar cena"):
+class SceneCreateModal(
+    Modal,
+    title="Criar cena",
+):
     scene_name = TextInput(
         label="Qual o nome da cena?",
         placeholder="Ex: Reunião no porto",
@@ -166,7 +279,10 @@ class SceneCreateModal(Modal, title="Criar cena"):
         max_length=100,
     )
 
-    async def on_submit(self, interaction: discord.Interaction):
+    async def on_submit(
+        self,
+        interaction: discord.Interaction,
+    ):
         try:
             if interaction.guild is None:
                 await interaction.response.send_message(
@@ -175,7 +291,10 @@ class SceneCreateModal(Modal, title="Criar cena"):
                 )
                 return
 
-            if not isinstance(interaction.user, discord.Member):
+            if not isinstance(
+                interaction.user,
+                discord.Member,
+            ):
                 await interaction.response.send_message(
                     "Não foi possível validar seu usuário no servidor.",
                     ephemeral=True,
@@ -185,13 +304,24 @@ class SceneCreateModal(Modal, title="Criar cena"):
             guild = interaction.guild
             member = interaction.user
 
-            in_scene_role = get_role_by_name(guild, INSCENE_ROLE_NAME)
-            narrator_role = get_role_by_name(guild, NARRATOR_ROLE_NAME)
-            info_players_channel = get_text_channel_by_name(
-                guild, INFO_PLAYERS_CHANNEL_NAME
+            in_scene_role = get_role_by_name(
+                guild,
+                INSCENE_ROLE_NAME,
             )
+
+            narrator_role = get_role_by_name(
+                guild,
+                NARRATOR_ROLE_NAME,
+            )
+
+            info_players_channel = get_text_channel_by_name(
+                guild,
+                INFO_PLAYERS_CHANNEL_NAME,
+            )
+
             ongoing_category = find_category_by_name(
-                guild, ONGOING_ACTIONS_CATEGORY_NAME
+                guild,
+                ONGOING_ACTIONS_CATEGORY_NAME,
             )
 
             if in_scene_role is None:
@@ -222,33 +352,22 @@ class SceneCreateModal(Modal, title="Criar cena"):
                 )
                 return
 
-            active_scene_channels = find_active_scene_channels_for_member(
-                guild, member.id
+            active_scene_count = count_active_scenes_for_member(
+                guild,
+                member.id,
             )
-            if active_scene_channels:
-                channel_mentions = ", ".join(
-                    channel.mention for channel in active_scene_channels[:5]
-                )
 
+            if active_scene_count >= MAX_ACTIVE_SCENES_PER_PLAYER:
                 await interaction.response.send_message(
-                    "Você já possui uma cena ativa. "
-                    f"Canais encontrados: {channel_mentions}",
-                    ephemeral=True,
-                )
-                return
-
-            if any(
-                role.name.strip().lower() == INSCENE_ROLE_NAME.strip().lower()
-                for role in member.roles
-            ):
-                await interaction.response.send_message(
-                    "Você já está em uma cena.",
+                    f"Você já está no limite de "
+                    f"{MAX_ACTIVE_SCENES_PER_PLAYER} cenas ativas.",
                     ephemeral=True,
                 )
                 return
 
             player_info_message = await find_player_info_message_by_discord_id(
-                info_players_channel, member.id
+                info_players_channel,
+                member.id,
             )
 
             if player_info_message is None:
@@ -259,6 +378,7 @@ class SceneCreateModal(Modal, title="Criar cena"):
                 return
 
             character_name = extract_character_name(player_info_message.content or "")
+
             if not character_name:
                 await interaction.response.send_message(
                     "Não encontrei o nome do personagem na sua ficha.",
@@ -266,16 +386,26 @@ class SceneCreateModal(Modal, title="Criar cena"):
                 )
                 return
 
-            character_category = find_category_by_name(guild, character_name)
+            character_category = find_category_by_name(
+                guild,
+                character_name,
+            )
+
             if character_category is None:
                 await interaction.response.send_message(
-                    f"Não encontrei a categoria privada do personagem **{character_name}**.",
+                    f"Não encontrei a categoria privada do personagem "
+                    f"**{character_name}**.",
                     ephemeral=True,
                 )
                 return
 
             scene_raw_name = str(self.scene_name.value).strip()
+
+            # Cada cena agora recebe um identificador único.
+            scene_id = uuid.uuid4().hex[:12]
+
             scene_channel_name = slugify_channel_name(scene_raw_name)
+
             action_channel_name = f"{scene_channel_name}-acoes"
 
             everyone_role = guild.default_role
@@ -313,16 +443,26 @@ class SceneCreateModal(Modal, title="Criar cena"):
                 name=scene_channel_name,
                 category=character_category,
                 overwrites=scene_overwrites,
-                topic=build_scene_topic(member.id, "main", "active"),
-                reason=f"Cena criada para {member.display_name}",
+                topic=build_scene_topic(
+                    member.id,
+                    "main",
+                    "active",
+                    scene_id,
+                ),
+                reason=(f"Cena criada para " f"{member.display_name}"),
             )
 
             await guild.create_text_channel(
                 name=action_channel_name,
                 category=ongoing_category,
                 overwrites=action_overwrites,
-                topic=build_scene_topic(member.id, "action", "active"),
-                reason=f"Canal de ações em andamento para {member.display_name}",
+                topic=build_scene_topic(
+                    member.id,
+                    "action",
+                    "active",
+                    scene_id,
+                ),
+                reason=("Canal de ações em andamento para " f"{member.display_name}"),
             )
 
             await member.add_roles(
@@ -334,18 +474,21 @@ class SceneCreateModal(Modal, title="Criar cena"):
                 f"{member.mention}\n"
                 "O canal da sua cena foi criado, mas ela ainda não começou. "
                 "Para facilitar ao narrador, precisamos entender alguns pontos importantes.\n"
-                "Então utilize o comando /cena_descrever e preenha as perguntas.\n"
-                "Ah! É importante salientar que enquanto a cena estiver aberta, você não poderá participar de outras cenas.\n"
+                "Então utilize o comando /cena_descrever e preencha as perguntas.\n"
+                "Você pode participar de até 3 cenas simultaneamente.\n"
                 "Para encerrar a cena, utilize a qualquer momento o comando /cena_encerrar."
             )
 
             await interaction.followup.send(
-                f"Cena criada com sucesso em {scene_channel.mention}.",
+                f"Cena criada com sucesso em " f"{scene_channel.mention}.",
                 ephemeral=True,
             )
 
         except Exception as e:
-            logger.exception("Erro ao criar cena: %s", e)
+            logger.exception(
+                "Erro ao criar cena: %s",
+                e,
+            )
 
             if interaction.response.is_done():
                 await interaction.followup.send(
@@ -359,7 +502,9 @@ class SceneCreateModal(Modal, title="Criar cena"):
                 )
 
 
-async def execute_scene_create_command(interaction: discord.Interaction):
+async def execute_scene_create_command(
+    interaction: discord.Interaction,
+):
     try:
         if interaction.guild is None:
             await interaction.response.send_message(
@@ -368,37 +513,25 @@ async def execute_scene_create_command(interaction: discord.Interaction):
             )
             return
 
-        if not isinstance(interaction.user, discord.Member):
+        if not isinstance(
+            interaction.user,
+            discord.Member,
+        ):
             await interaction.response.send_message(
                 "Não foi possível validar suas roles no servidor.",
                 ephemeral=True,
             )
             return
 
-        active_scene_channels = find_active_scene_channels_for_member(
+        active_scene_count = count_active_scenes_for_member(
             interaction.guild,
             interaction.user.id,
         )
-        if active_scene_channels:
-            channel_mentions = ", ".join(
-                channel.mention for channel in active_scene_channels[:5]
-            )
 
+        if active_scene_count >= MAX_ACTIVE_SCENES_PER_PLAYER:
             await interaction.response.send_message(
-                "Você já possui uma cena ativa. "
-                f"Canais encontrados: {channel_mentions}",
-                ephemeral=True,
-            )
-            return
-
-        has_in_scene_role = any(
-            role.name.strip().lower() == INSCENE_ROLE_NAME.strip().lower()
-            for role in interaction.user.roles
-        )
-
-        if has_in_scene_role:
-            await interaction.response.send_message(
-                "Você já possui a role inScene e não pode criar outra cena agora.",
+                f"Você já está no limite de "
+                f"{MAX_ACTIVE_SCENES_PER_PLAYER} cenas ativas.",
                 ephemeral=True,
             )
             return
@@ -406,7 +539,10 @@ async def execute_scene_create_command(interaction: discord.Interaction):
         await interaction.response.send_modal(SceneCreateModal())
 
     except Exception as e:
-        logger.exception("Erro no execute_scene_create_command: %s", e)
+        logger.exception(
+            "Erro no execute_scene_create_command: %s",
+            e,
+        )
 
         if interaction.response.is_done():
             await interaction.followup.send(
