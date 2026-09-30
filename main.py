@@ -17,6 +17,7 @@ from commands.action_command import execute_action_command
 from commands.txt_command import execute_txt_command
 from commands.adm_new_txt_command import execute_adm_new_txt_command
 from commands.checkin_command import execute_checkin_command
+from commands.character_avatar_command import execute_character_avatar_command
 from commands.scene_create_command import execute_scene_create_command
 from commands.scene_create_adm_command import execute_scene_create_adm_command
 from commands.scene_close_command import execute_scene_close_command
@@ -34,7 +35,6 @@ ALLOWED_ROLE_NAME = "Narrador"
 
 load_dotenv()
 
-
 DISCORD_TOKEN = os.getenv(
     "DISCORD_TOKEN",
     "",
@@ -50,14 +50,13 @@ GUILD_ID = int(
 
 logging.basicConfig(
     level=logging.INFO,
-    format=("[%(asctime)s] " "[%(levelname)s] " "%(message)s"),
+    format="[%(asctime)s] [%(levelname)s] %(message)s",
 )
 
 logger = logging.getLogger("discord_debug")
 
 
 intents = discord.Intents.default()
-
 intents.guilds = True
 intents.messages = True
 intents.message_content = True
@@ -109,13 +108,13 @@ async def cls_error(
         error,
     )
 
-    msg = "Você não tem permissão " "para usar este comando."
+    msg = "Você não tem permissão para usar este comando."
 
     if not isinstance(
         error,
         app_commands.errors.MissingPermissions,
     ):
-        msg = f"Erro ao executar /cls: " f"{error}"
+        msg = f"Erro ao executar /cls: {error}"
 
     if interaction.response.is_done():
         await interaction.followup.send(
@@ -136,7 +135,7 @@ async def cls_error(
 
 @bot.tree.command(
     name="cls_all",
-    description=("Apaga todo o canal e recria " "ele no mesmo lugar"),
+    description="Apaga todo o canal e recria ele no mesmo lugar",
     guild=TEST_GUILD,
 )
 @app_commands.guild_only()
@@ -156,7 +155,7 @@ async def cls_all_error(
         error,
     )
 
-    msg = f"Erro ao executar /cls_all: " f"{error}"
+    msg = f"Erro ao executar /cls_all: {error}"
 
     if interaction.response.is_done():
         await interaction.followup.send(
@@ -177,7 +176,7 @@ async def cls_all_error(
 
 @bot.tree.command(
     name="email",
-    description=("Envia o histórico do canal para " "os jogadores presentes no canal"),
+    description="Envia o histórico do canal para os jogadores presentes no canal",
     guild=TEST_GUILD,
 )
 @app_commands.guild_only()
@@ -197,7 +196,7 @@ async def email_error(
         error,
     )
 
-    msg = f"Erro ao executar /email: " f"{error}"
+    msg = f"Erro ao executar /email: {error}"
 
     if interaction.response.is_done():
         await interaction.followup.send(
@@ -218,7 +217,7 @@ async def email_error(
 
 @bot.tree.command(
     name="cadastrar",
-    description=("Monta a lista inicial de jogadores " "do canal info players"),
+    description="Monta a lista inicial de jogadores do canal info players",
     guild=TEST_GUILD,
 )
 @app_commands.checks.has_permissions(manage_roles=True)
@@ -239,13 +238,13 @@ async def cadastrar_error(
         error,
     )
 
-    msg = "Você não tem permissão " "para usar este comando."
+    msg = "Você não tem permissão para usar este comando."
 
     if not isinstance(
         error,
         app_commands.errors.MissingPermissions,
     ):
-        msg = f"Erro ao executar /cadastrar: " f"{error}"
+        msg = f"Erro ao executar /cadastrar: {error}"
 
     if interaction.response.is_done():
         await interaction.followup.send(
@@ -260,8 +259,7 @@ async def cadastrar_error(
 
 
 # ============================================================
-# /inout
-# DESATIVADO
+# /inout - DESATIVADO
 # ============================================================
 
 # @bot.tree.command(
@@ -273,55 +271,22 @@ async def cadastrar_error(
 # async def inout(
 #     interaction: discord.Interaction,
 # ):
-#     await execute_inout_command(
-#         interaction
-#     )
-#
-#
-# @inout.error
-# async def inout_error(
-#     interaction: discord.Interaction,
-#     error,
-# ):
-#     logger.exception(
-#         "Erro no comando /inout: %s",
-#         error,
-#     )
-#
-#     msg = (
-#         f"Erro ao executar /inout: "
-#         f"{error}"
-#     )
-#
-#     if interaction.response.is_done():
-#         await interaction.followup.send(
-#             msg,
-#             ephemeral=True,
-#         )
-#     else:
-#         await interaction.response.send_message(
-#             msg,
-#             ephemeral=True,
-#         )
+#     await execute_inout_command(interaction)
 
 
 # ============================================================
-# !jkp
-# DESATIVADO
+# !jkp - DESATIVADO
 # ============================================================
 
 """
 @bot.command(name="jkp")
-async def jkp(
-    ctx: commands.Context,
-):
+async def jkp(ctx: commands.Context):
     await execute_jkp_command(ctx)
 """
 
 
 # ============================================================
-# /start
-# DESATIVADO
+# /start - DESATIVADO
 # ============================================================
 
 # @bot.tree.command(
@@ -333,36 +298,7 @@ async def jkp(
 # async def start(
 #     interaction: discord.Interaction,
 # ):
-#     await execute_action_command(
-#         interaction
-#     )
-#
-#
-# @start.error
-# async def start_error(
-#     interaction: discord.Interaction,
-#     error,
-# ):
-#     logger.exception(
-#         "Erro no comando /start: %s",
-#         error,
-#     )
-#
-#     msg = (
-#         f"Erro ao executar /start: "
-#         f"{error}"
-#     )
-#
-#     if interaction.response.is_done():
-#         await interaction.followup.send(
-#             msg,
-#             ephemeral=True,
-#         )
-#     else:
-#         await interaction.response.send_message(
-#             msg,
-#             ephemeral=True,
-#         )
+#     await execute_action_command(interaction)
 
 
 # ============================================================
@@ -372,7 +308,7 @@ async def jkp(
 
 @bot.tree.command(
     name="txt",
-    description=("Envia uma mensagem de texto " "para um ou mais jogadores"),
+    description="Envia uma mensagem de texto para um ou mais jogadores",
     guild=TEST_GUILD,
 )
 @app_commands.guild_only()
@@ -412,7 +348,7 @@ async def txt_error(
         error,
     )
 
-    msg = f"Erro ao executar /txt: " f"{error}"
+    msg = f"Erro ao executar /txt: {error}"
 
     if interaction.response.is_done():
         await interaction.followup.send(
@@ -474,7 +410,7 @@ async def cena_criar_error(
         error,
     )
 
-    msg = f"Erro ao executar /cena_criar: " f"{error}"
+    msg = f"Erro ao executar /cena_criar: {error}"
 
     if interaction.response.is_done():
         await interaction.followup.send(
@@ -495,10 +431,10 @@ async def cena_criar_error(
 
 @bot.tree.command(
     name="cena_criar_adm",
-    description=("Cria uma cena para um jogador " "sem limite administrativo"),
+    description="Cria uma cena para um jogador sem limite administrativo",
     guild=TEST_GUILD,
 )
-@app_commands.describe(jogador=("Selecione o jogador para quem " "a cena será criada"))
+@app_commands.describe(jogador="Selecione o jogador para quem a cena será criada")
 @app_commands.guild_only()
 async def cena_criar_adm(
     interaction: discord.Interaction,
@@ -520,7 +456,7 @@ async def cena_criar_adm_error(
         error,
     )
 
-    msg = f"Erro ao executar " f"/cena_criar_adm: {error}"
+    msg = f"Erro ao executar /cena_criar_adm: {error}"
 
     if interaction.response.is_done():
         await interaction.followup.send(
@@ -561,7 +497,7 @@ async def cena_encerrar_error(
         error,
     )
 
-    msg = f"Erro ao executar /cena_encerrar: " f"{error}"
+    msg = f"Erro ao executar /cena_encerrar: {error}"
 
     if interaction.response.is_done():
         await interaction.followup.send(
@@ -582,7 +518,7 @@ async def cena_encerrar_error(
 
 @bot.tree.command(
     name="cena_encerrar_adm",
-    description=("Encerra administrativamente toda a cena atual"),
+    description="Encerra administrativamente toda a cena atual",
     guild=TEST_GUILD,
 )
 @app_commands.guild_only()
@@ -602,7 +538,7 @@ async def cena_encerrar_adm_error(
         error,
     )
 
-    msg = f"Erro ao executar " f"/cena_encerrar_adm: {error}"
+    msg = f"Erro ao executar /cena_encerrar_adm: {error}"
 
     if interaction.response.is_done():
         await interaction.followup.send(
@@ -623,7 +559,7 @@ async def cena_encerrar_adm_error(
 
 @bot.tree.command(
     name="cena_descrever",
-    description=("Responde perguntas para auxiliar " "o narrador com o tom da cena"),
+    description="Responde perguntas para auxiliar o narrador com o tom da cena",
     guild=TEST_GUILD,
 )
 @app_commands.guild_only()
@@ -643,7 +579,7 @@ async def cena_descrever_error(
         error,
     )
 
-    msg = f"Erro ao executar /cena_descrever: " f"{error}"
+    msg = f"Erro ao executar /cena_descrever: {error}"
 
     if interaction.response.is_done():
         await interaction.followup.send(
@@ -770,7 +706,53 @@ async def check_in_error(
         error,
     )
 
-    msg = f"Erro ao executar /check-in: " f"{error}"
+    msg = f"Erro ao executar /check-in: {error}"
+
+    if interaction.response.is_done():
+        await interaction.followup.send(
+            msg,
+            ephemeral=True,
+        )
+    else:
+        await interaction.response.send_message(
+            msg,
+            ephemeral=True,
+        )
+
+
+# ============================================================
+# /personagem_avatar
+# ============================================================
+
+
+@bot.tree.command(
+    name="personagem_avatar",
+    description="Cadastra ou atualiza o avatar do seu personagem",
+    guild=TEST_GUILD,
+)
+@app_commands.describe(url="URL da imagem que será usada como avatar do personagem")
+@app_commands.guild_only()
+async def personagem_avatar(
+    interaction: discord.Interaction,
+    url: str,
+):
+    await execute_character_avatar_command(
+        interaction,
+        url,
+    )
+
+
+@personagem_avatar.error
+async def personagem_avatar_error(
+    interaction: discord.Interaction,
+    error,
+):
+    logger.exception(
+        "Erro no comando /personagem_avatar: %s",
+        error,
+    )
+
+    msg = f"Erro ao executar " f"/personagem_avatar: {error}"
 
     if interaction.response.is_done():
         await interaction.followup.send(
@@ -791,7 +773,7 @@ async def check_in_error(
 
 @bot.tree.command(
     name="canal_convidar",
-    description=("Convida outro jogador " "para participar da sua cena"),
+    description="Convida outro jogador para participar da sua cena",
     guild=TEST_GUILD,
 )
 @app_commands.guild_only()
@@ -815,7 +797,7 @@ async def canal_convidar_error(
         error,
     )
 
-    msg = f"Erro ao executar /canal_convidar: " f"{error}"
+    msg = f"Erro ao executar /canal_convidar: {error}"
 
     if interaction.response.is_done():
         await interaction.followup.send(
@@ -836,12 +818,10 @@ async def canal_convidar_error(
 
 @bot.tree.command(
     name="canal_convidar_adm",
-    description=(
-        "Adiciona um jogador diretamente " "a uma cena sem limite administrativo"
-    ),
+    description="Adiciona um jogador diretamente a uma cena sem limite administrativo",
     guild=TEST_GUILD,
 )
-@app_commands.describe(jogador=("Selecione o jogador que será " "adicionado à cena"))
+@app_commands.describe(jogador="Selecione o jogador que será adicionado à cena")
 @app_commands.guild_only()
 async def canal_convidar_adm(
     interaction: discord.Interaction,
@@ -859,11 +839,11 @@ async def canal_convidar_adm_error(
     error,
 ):
     logger.exception(
-        "Erro no comando " "/canal_convidar_adm: %s",
+        "Erro no comando /canal_convidar_adm: %s",
         error,
     )
 
-    msg = f"Erro ao executar " f"/canal_convidar_adm: {error}"
+    msg = f"Erro ao executar /canal_convidar_adm: {error}"
 
     if interaction.response.is_done():
         await interaction.followup.send(
@@ -942,9 +922,5 @@ async def on_ready():
             error,
         )
 
-
-# ============================================================
-# START
-# ============================================================
 
 bot.run(DISCORD_TOKEN)
