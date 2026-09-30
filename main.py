@@ -17,6 +17,7 @@ from commands.txt_command import execute_txt_command
 from commands.adm_new_txt_command import execute_adm_new_txt_command
 from commands.checkin_command import execute_checkin_command
 from commands.scene_create_command import execute_scene_create_command
+from commands.scene_create_adm_command import execute_scene_create_adm_command
 from commands.scene_close_command import execute_scene_close_command
 from commands.scene_describe_command import execute_scene_describe_command
 from commands.channel_invite_command import execute_channel_invite_command
@@ -256,6 +257,47 @@ async def cena_criar_error(interaction: discord.Interaction, error):
         await interaction.followup.send(msg, ephemeral=True)
     else:
         await interaction.response.send_message(msg, ephemeral=True)
+
+
+@bot.tree.command(
+    name="cena_criar_adm",
+    description="Cria uma cena para um jogador sem limite administrativo",
+    guild=TEST_GUILD,
+)
+@app_commands.describe(jogador="Selecione o jogador para quem a cena será criada")
+@app_commands.guild_only()
+async def cena_criar_adm(
+    interaction: discord.Interaction,
+    jogador: discord.Member,
+):
+    await execute_scene_create_adm_command(
+        interaction,
+        jogador,
+    )
+
+
+@cena_criar_adm.error
+async def cena_criar_adm_error(
+    interaction: discord.Interaction,
+    error,
+):
+    logger.exception(
+        "Erro no comando /cena_criar_adm: %s",
+        error,
+    )
+
+    msg = f"Erro ao executar " f"/cena_criar_adm: {error}"
+
+    if interaction.response.is_done():
+        await interaction.followup.send(
+            msg,
+            ephemeral=True,
+        )
+    else:
+        await interaction.response.send_message(
+            msg,
+            ephemeral=True,
+        )
 
 
 @bot.tree.command(
