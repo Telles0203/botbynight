@@ -33,13 +33,10 @@ def is_valid_http_url(
 
 def get_avatar_line_pattern() -> re.Pattern:
     """
-    Reconhece linhas como:
+    Reconhece:
 
     **Avatar do personagem:** https://...
     Avatar do personagem: https://...
-
-    Isso permite remover também alguma versão antiga
-    que tenha sido salva sem negrito.
     """
 
     return re.compile(
@@ -47,9 +44,39 @@ def get_avatar_line_pattern() -> re.Pattern:
         rf"\*{{0,2}}"
         rf"{re.escape(AVATAR_FIELD_LABEL)}:"
         rf"\*{{0,2}}"
-        rf"[ \t]*.*$",
+        rf"[ \t]*(.*)$",
         re.IGNORECASE | re.MULTILINE,
     )
+
+
+def extract_character_avatar(
+    content: str,
+) -> str | None:
+    """
+    Lê o avatar salvo na ficha do jogador.
+
+    Retorna None quando não houver avatar.
+    """
+
+    if not content:
+        return None
+
+    pattern = get_avatar_line_pattern()
+
+    match = pattern.search(content)
+
+    if not match:
+        return None
+
+    value = (match.group(1) or "").strip()
+
+    if not value:
+        return None
+
+    if not is_valid_http_url(value):
+        return None
+
+    return value
 
 
 def build_updated_player_info_text(
@@ -57,7 +84,7 @@ def build_updated_player_info_text(
     avatar_url: str,
 ) -> str:
     """
-    Adiciona ou substitui o avatar da ficha.
+    Adiciona ou substitui o avatar.
     """
 
     avatar_line = f"**{AVATAR_FIELD_LABEL}:** " f"{avatar_url}"
@@ -83,11 +110,11 @@ def remove_avatar_from_player_info_text(
     current_content: str,
 ) -> tuple[str, bool]:
     """
-    Remove somente a linha do avatar.
+    Remove apenas a linha do avatar.
 
     Retorna:
-        novo_texto
-        True/False indicando se havia avatar
+        texto atualizado
+        True se havia avatar
     """
 
     pattern = get_avatar_line_pattern()
@@ -104,8 +131,6 @@ def remove_avatar_from_player_info_text(
         count=1,
     )
 
-    # Evita deixar várias linhas em branco
-    # depois da remoção.
     updated_content = re.sub(
         r"\n{3,}",
         "\n\n",
@@ -124,12 +149,6 @@ async def execute_character_avatar_command(
     interaction: discord.Interaction,
     url: str,
 ):
-    """
-    /personagem_avatar
-
-    Cadastra ou substitui o avatar.
-    """
-
     try:
         if interaction.guild is None:
             await interaction.response.send_message(
@@ -274,12 +293,6 @@ async def execute_character_avatar_command(
 async def execute_character_avatar_remove_command(
     interaction: discord.Interaction,
 ):
-    """
-    /personagem_avatar_remover
-
-    Remove o avatar cadastrado da ficha.
-    """
-
     try:
         if interaction.guild is None:
             await interaction.response.send_message(
