@@ -20,6 +20,7 @@ from commands.checkin_command import execute_checkin_command
 from commands.scene_create_command import execute_scene_create_command
 from commands.scene_create_adm_command import execute_scene_create_adm_command
 from commands.scene_close_command import execute_scene_close_command
+from commands.scene_close_adm_command import execute_scene_close_adm_command
 from commands.scene_describe_command import execute_scene_describe_command
 from commands.channel_invite_command import execute_channel_invite_command
 from commands.channel_invite_adm_command import (
@@ -453,7 +454,7 @@ async def adm_new_txt(
 
 @bot.tree.command(
     name="cena_criar",
-    description=("Cria a cena individual do jogador"),
+    description="Cria a cena individual do jogador",
     guild=TEST_GUILD,
 )
 @app_commands.guild_only()
@@ -540,7 +541,7 @@ async def cena_criar_adm_error(
 
 @bot.tree.command(
     name="cena_encerrar",
-    description=("Encerra a cena atual do jogador"),
+    description="Encerra a cena atual do jogador",
     guild=TEST_GUILD,
 )
 @app_commands.guild_only()
@@ -561,6 +562,47 @@ async def cena_encerrar_error(
     )
 
     msg = f"Erro ao executar /cena_encerrar: " f"{error}"
+
+    if interaction.response.is_done():
+        await interaction.followup.send(
+            msg,
+            ephemeral=True,
+        )
+    else:
+        await interaction.response.send_message(
+            msg,
+            ephemeral=True,
+        )
+
+
+# ============================================================
+# /cena_encerrar_adm
+# ============================================================
+
+
+@bot.tree.command(
+    name="cena_encerrar_adm",
+    description=("Encerra administrativamente toda a cena atual"),
+    guild=TEST_GUILD,
+)
+@app_commands.guild_only()
+async def cena_encerrar_adm(
+    interaction: discord.Interaction,
+):
+    await execute_scene_close_adm_command(interaction)
+
+
+@cena_encerrar_adm.error
+async def cena_encerrar_adm_error(
+    interaction: discord.Interaction,
+    error,
+):
+    logger.exception(
+        "Erro no comando /cena_encerrar_adm: %s",
+        error,
+    )
+
+    msg = f"Erro ao executar " f"/cena_encerrar_adm: {error}"
 
     if interaction.response.is_done():
         await interaction.followup.send(
@@ -638,8 +680,6 @@ async def on_message(
 
     channel_name = message.channel.name.strip().lower()
 
-    # Fora do check-in:
-    # verifica espelhamento de cenas.
     if channel_name != RESTRICTED_CHANNEL_NAME:
         await mirror_scene_message(message)
 
@@ -710,7 +750,7 @@ async def on_message(
 
 @bot.tree.command(
     name="check-in",
-    description=("Executa o check-in completo do jogador"),
+    description="Executa o check-in completo do jogador",
     guild=TEST_GUILD,
 )
 @app_commands.guild_only()
