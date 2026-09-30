@@ -395,7 +395,6 @@ class CheckInModalStep2(Modal, title="Check-in - Etapa 2"):
                 await interaction.followup.send(
                     f"Erro ao processar a etapa 2: {e}",
                     ephemeral=True,
-                    delete_after=5,
                 )
             else:
                 await interaction.response.send_message(

@@ -19,8 +19,6 @@ from commands.scene_create_command import (
 logger = logging.getLogger("discord_debug")
 
 
-# IMPORTANTE:
-# O Discord não permite criar webhooks cujo nome contenha "discord".
 WEBHOOK_NAME = "RP Character"
 
 MAX_WEBHOOK_USERNAME_LENGTH = 80
@@ -31,6 +29,18 @@ WEBHOOK_CACHE: dict[
     int,
     discord.Webhook,
 ] = {}
+
+
+# ============================================================
+# MENÇÕES PERMITIDAS
+# ============================================================
+
+SCENE_ALLOWED_MENTIONS = discord.AllowedMentions(
+    users=True,
+    roles=False,
+    everyone=False,
+    replied_user=False,
+)
 
 
 # ============================================================
@@ -218,19 +228,6 @@ def get_scene_channels(
 def get_expected_player_id(
     channel: discord.TextChannel,
 ) -> int | None:
-    """
-    Define quem é o jogador daquele canal.
-
-    main:
-        scene_owner
-
-    guest:
-        invited_member
-
-    action:
-        nenhum jogador específico
-    """
-
     data = parse_scene_topic(channel.topic)
 
     scene_type = (
@@ -251,6 +248,33 @@ def get_expected_player_id(
         return parse_int(data.get("invited_member"))
 
     return None
+
+
+def get_scene_participant_ids(
+    guild: discord.Guild,
+    reference_channel: discord.TextChannel,
+) -> list[int]:
+    participant_ids: set[int] = set()
+
+    linked_channels = get_scene_channels(
+        guild,
+        reference_channel,
+    )
+
+    for channel in linked_channels:
+        data = parse_scene_topic(channel.topic)
+
+        owner_id = parse_int(data.get("scene_owner"))
+
+        if owner_id is not None:
+            participant_ids.add(owner_id)
+
+        invited_id = parse_int(data.get("invited_member"))
+
+        if invited_id is not None:
+            participant_ids.add(invited_id)
+
+    return list(participant_ids)
 
 
 # ============================================================
@@ -280,8 +304,6 @@ async def get_character_profile(
             None,
         )
 
-    debug_log(f"Canal info-players encontrado: " f"#{info_players_channel.name}")
-
     player_info_message = await find_player_info_message_by_discord_id(
         info_players_channel,
         member_id,
@@ -295,8 +317,6 @@ async def get_character_profile(
             None,
         )
 
-    debug_log(f"Ficha encontrada. " f"message_id={player_info_message.id}")
-
     content = player_info_message.content or ""
 
     character_name = extract_character_name(content)
@@ -307,13 +327,131 @@ async def get_character_profile(
 
     debug_log("Avatar encontrado: " + ("SIM" if character_avatar else "NÃO"))
 
-    if character_avatar:
-        debug_log(f"Avatar URL: " f"{character_avatar}")
-
     return (
         character_name,
         character_avatar,
     )
+
+
+async def get_scene_character_mentions(
+    guild: discord.Guild,
+    reference_channel: discord.TextChannel,
+) -> dict[str, int]:
+    """
+    Monta:
+
+    nome do personagem -> Discord ID
+
+    apenas para participantes da cena.
+    """
+
+    participant_ids = get_scene_participant_ids(
+        guild,
+        reference_channel,
+    )
+
+    names_found: dict[
+        str,
+        list[tuple[str, int]],
+    ] = {}
+
+    for member_id in participant_ids:
+        (
+            character_name,
+            _,
+        ) = await get_character_profile(
+            guild,
+            member_id,
+        )
+
+        if not character_name:
+            continue
+
+        clean_name = character_name.strip()
+
+        if not clean_name:
+            continue
+
+        normalized_name = clean_name.casefold()
+
+        names_found.setdefault(
+            normalized_name,
+            [],
+        ).append(
+            (
+                clean_name,
+                member_id,
+            )
+        )
+
+    result: dict[str, int] = {}
+
+    for entries in names_found.values():
+        # Se dois personagens tiverem o mesmo nome,
+        # não converte automaticamente.
+        if len(entries) != 1:
+            debug_log(
+                "Menção de personagem ambígua ignorada: "
+                + ", ".join(name for name, _ in entries)
+            )
+            continue
+
+        character_name, member_id = entries[0]
+
+        result[character_name] = member_id
+
+    return result
+
+
+def replace_character_mentions(
+    content: str,
+    character_mentions: dict[str, int],
+) -> str:
+    """
+    Converte:
+
+    @Nine Fingers
+
+    em:
+
+    <@123456789>
+
+    Somente para personagens presentes
+    na cena atual.
+    """
+
+    if not content:
+        return content
+
+    if not character_mentions:
+        return content
+
+    result = content
+
+    # Nomes maiores primeiro.
+    #
+    # Exemplo:
+    # @Nine Fingers antes de @Nine.
+    sorted_entries = sorted(
+        character_mentions.items(),
+        key=lambda item: len(item[0]),
+        reverse=True,
+    )
+
+    for character_name, member_id in sorted_entries:
+        escaped_name = re.escape(character_name)
+
+        pattern = re.compile(
+            rf"(?<![\w<])" rf"@{escaped_name}" rf"(?=$|\s|[.,!?;:\)\]\}}>'\"])",
+            re.IGNORECASE,
+        )
+
+        result = pattern.sub(
+            f"<@{member_id}>",
+            result,
+        )
+
+    return result
 
 
 # ============================================================
@@ -324,67 +462,27 @@ async def get_character_profile(
 async def get_or_create_webhook(
     channel: discord.TextChannel,
 ) -> discord.Webhook:
-    debug_log(f"Buscando webhook em " f"#{channel.name} " f"(ID {channel.id})")
-
-    debug_log("Permissões do bot neste canal: " + get_bot_permissions_text(channel))
-
     cached_webhook = WEBHOOK_CACHE.get(channel.id)
 
     if cached_webhook is not None:
-        debug_log(f"Webhook encontrado no cache: " f"id={cached_webhook.id}")
-
         return cached_webhook
 
-    try:
-        webhooks = await channel.webhooks()
-
-    except discord.Forbidden as error:
-        debug_log(f"ERRO DE PERMISSÃO ao listar " f"webhooks: {error}")
-
-        raise
-
-    except Exception as error:
-        debug_log(f"ERRO ao listar webhooks: " f"{type(error).__name__}: {error}")
-
-        raise
-
-    debug_log(f"Total de webhooks existentes " f"no canal: {len(webhooks)}")
+    webhooks = await channel.webhooks()
 
     for webhook in webhooks:
-        debug_log(f"Webhook existente: " f"id={webhook.id} " f"name={webhook.name!r}")
-
         webhook_name = (webhook.name or "").strip().lower()
 
         if webhook_name == WEBHOOK_NAME.lower():
-            debug_log(f"Webhook '{WEBHOOK_NAME}' " f"encontrado. " f"id={webhook.id}")
-
             WEBHOOK_CACHE[channel.id] = webhook
 
             return webhook
 
-    debug_log(f"Webhook '{WEBHOOK_NAME}' " f"não existe. Criando...")
-
-    try:
-        webhook = await channel.create_webhook(
-            name=WEBHOOK_NAME,
-            reason=("Webhook para mensagens " "de personagens em cenas"),
-        )
-
-    except discord.Forbidden as error:
-        debug_log(
-            f"ERRO DE PERMISSÃO ao criar " f"webhook em #{channel.name}: " f"{error}"
-        )
-
-        raise
-
-    except Exception as error:
-        debug_log(f"ERRO ao criar webhook: " f"{type(error).__name__}: " f"{error}")
-
-        raise
+    webhook = await channel.create_webhook(
+        name=WEBHOOK_NAME,
+        reason=("Webhook para mensagens " "de personagens em cenas"),
+    )
 
     WEBHOOK_CACHE[channel.id] = webhook
-
-    debug_log(f"Webhook criado com sucesso. " f"id={webhook.id}")
 
     return webhook
 
@@ -394,11 +492,6 @@ def normalize_webhook_username(
 ) -> str:
     value = name.strip() or "Personagem"
 
-    # O Discord também pode rejeitar usernames
-    # enviados pelo webhook contendo "discord".
-    #
-    # Isso evita que um personagem com esse texto
-    # no nome cause erro 50035.
     value = re.sub(
         r"discord",
         "Dscord",
@@ -424,7 +517,7 @@ async def _send_webhook_message(
     kwargs = {
         "content": (content if content else None),
         "username": (normalize_webhook_username(character_name)),
-        "allowed_mentions": (discord.AllowedMentions.none()),
+        "allowed_mentions": (SCENE_ALLOWED_MENTIONS),
         "wait": True,
     }
 
@@ -434,19 +527,7 @@ async def _send_webhook_message(
     if attachment_payloads:
         kwargs["files"] = build_files(attachment_payloads)
 
-    debug_log(
-        f"Enviando webhook como "
-        f"{normalize_webhook_username(character_name)!r} | "
-        f"avatar="
-        f"{'SIM' if avatar_url else 'NÃO'} | "
-        f"anexos={len(attachment_payloads)}"
-    )
-
-    result = await webhook.send(**kwargs)
-
-    debug_log("Mensagem enviada pelo webhook " "com sucesso.")
-
-    return result
+    return await webhook.send(**kwargs)
 
 
 async def send_as_character(
@@ -456,8 +537,6 @@ async def send_as_character(
     avatar_url: str | None,
     attachment_payloads: list[tuple[str, bytes]],
 ):
-    debug_log(f"Preparando publicação como " f"personagem em #{channel.name}")
-
     webhook = await get_or_create_webhook(channel)
 
     try:
@@ -469,11 +548,7 @@ async def send_as_character(
             attachment_payloads,
         )
 
-    except discord.NotFound as error:
-        debug_log(
-            f"Webhook não encontrado " f"(possivelmente apagado). " f"Erro: {error}"
-        )
-
+    except discord.NotFound:
         WEBHOOK_CACHE.pop(
             channel.id,
             None,
@@ -489,13 +564,14 @@ async def send_as_character(
             attachment_payloads,
         )
 
-    except discord.HTTPException as error:
-        debug_log(
-            f"HTTPException no webhook: " f"status={error.status} " f"text={error.text}"
-        )
-
+    except discord.HTTPException:
         if avatar_url:
-            debug_log("Tentando novamente " "SEM avatar.")
+            logger.warning(
+                "Falha ao enviar webhook "
+                "com avatar no canal %s. "
+                "Tentando sem avatar.",
+                channel.id,
+            )
 
             return await _send_webhook_message(
                 webhook,
@@ -504,16 +580,6 @@ async def send_as_character(
                 None,
                 attachment_payloads,
             )
-
-        raise
-
-    except Exception as error:
-        debug_log(
-            f"ERRO inesperado ao enviar "
-            f"webhook: "
-            f"{type(error).__name__}: "
-            f"{error}"
-        )
 
         raise
 
@@ -528,22 +594,17 @@ async def read_attachment_payloads(
 ) -> list[tuple[str, bytes]] | None:
     payloads: list[tuple[str, bytes]] = []
 
-    debug_log(f"Quantidade de anexos: " f"{len(message.attachments)}")
-
     for attachment in message.attachments:
         try:
-            debug_log(f"Lendo anexo: " f"{attachment.filename}")
-
             data = await attachment.read()
 
         except Exception as error:
-            logger.exception(
-                "Não foi possível ler " "o anexo %s da mensagem " "%s.",
+            logger.warning(
+                "Não foi possível ler " "o anexo %s da mensagem " "%s: %s",
                 attachment.filename,
                 message.id,
+                error,
             )
-
-            debug_log(f"ERRO ao ler anexo: " f"{type(error).__name__}: " f"{error}")
 
             return None
 
@@ -576,10 +637,15 @@ def build_files(
 
 def build_legacy_mirrored_content(
     message: discord.Message,
+    content_override: str | None = None,
 ) -> str:
     author_name = message.author.display_name
 
-    original_content = (message.content or "").strip()
+    original_content = (
+        content_override if content_override is not None else message.content
+    )
+
+    original_content = (original_content or "").strip()
 
     if not original_content:
         original_content = "[sem texto]"
@@ -604,41 +670,33 @@ def build_legacy_mirrored_content(
 
 async def mirror_legacy_message(
     message: discord.Message,
+    content_override: str | None = None,
 ):
-    debug_log("Entrando no sistema " "de espelhamento LEGADO.")
-
     linked_channels = get_scene_channels(
         message.guild,
         message.channel,
     )
 
-    debug_log(
-        f"Canais encontrados para " f"espelhamento legado: " f"{len(linked_channels)}"
-    )
-
     if not linked_channels:
         return
 
-    content = build_legacy_mirrored_content(message)
+    content = build_legacy_mirrored_content(
+        message,
+        content_override,
+    )
 
     for channel in linked_channels:
         if channel.id == message.channel.id:
             continue
 
         try:
-            debug_log(f"Espelhando legado para " f"#{channel.name}")
-
-            await channel.send(content)
-
-        except Exception as error:
-            logger.exception("Falha ao espelhar mensagem " "em modo legado.")
-
-            debug_log(
-                f"ERRO legado em "
-                f"#{channel.name}: "
-                f"{type(error).__name__}: "
-                f"{error}"
+            await channel.send(
+                content,
+                allowed_mentions=(SCENE_ALLOWED_MENTIONS),
             )
+
+        except Exception:
+            logger.exception("Falha ao espelhar mensagem " "em modo legado.")
 
 
 # ============================================================
@@ -649,130 +707,68 @@ async def mirror_legacy_message(
 async def mirror_scene_message(
     message: discord.Message,
 ):
-    debug_log("==================================================")
-
-    debug_log(f"Nova mensagem recebida. " f"message_id={message.id}")
-
-    debug_log(f"Autor: " f"{message.author} " f"| ID={message.author.id}")
-
-    debug_log(f"Bot? {message.author.bot}")
-
-    debug_log(f"Webhook ID da mensagem: " f"{message.webhook_id}")
-
-    # --------------------------------------------------------
-    # BOT
-    # --------------------------------------------------------
-
     if message.author.bot:
-        debug_log("IGNORANDO: autor é bot.")
-
         return
-
-    # --------------------------------------------------------
-    # WEBHOOK
-    # --------------------------------------------------------
 
     if message.webhook_id is not None:
-        debug_log("IGNORANDO: mensagem veio " "de webhook.")
-
         return
-
-    # --------------------------------------------------------
-    # GUILD
-    # --------------------------------------------------------
 
     if message.guild is None:
-        debug_log("IGNORANDO: mensagem fora " "de servidor.")
-
         return
-
-    # --------------------------------------------------------
-    # CANAL
-    # --------------------------------------------------------
 
     if not isinstance(
         message.channel,
         discord.TextChannel,
     ):
-        debug_log("IGNORANDO: não é " "TextChannel.")
-
         return
-
-    debug_log(f"Canal: " f"#{message.channel.name} " f"| ID={message.channel.id}")
-
-    debug_log(f"Topic: " f"{message.channel.topic!r}")
-
-    debug_log("Permissões do bot: " + get_bot_permissions_text(message.channel))
-
-    # --------------------------------------------------------
-    # É CENA?
-    # --------------------------------------------------------
 
     if not is_scene_related_channel(message.channel):
-        debug_log("IGNORANDO: canal não foi " "reconhecido como cena ativa.")
-
         return
-
-    debug_log("Canal reconhecido como " "cena ativa.")
-
-    scene_data = parse_scene_topic(message.channel.topic)
-
-    debug_log(f"scene_type=" f"{scene_data.get('scene_type')}")
-
-    debug_log(f"scene_owner=" f"{scene_data.get('scene_owner')}")
-
-    debug_log(f"scene_id=" f"{scene_data.get('scene_id')}")
-
-    debug_log(f"invited_member=" f"{scene_data.get('invited_member')}")
-
-    # --------------------------------------------------------
-    # COMANDO PREFIXADO
-    # --------------------------------------------------------
 
     if message.content and message.content.strip().startswith("!"):
-        debug_log("IGNORANDO: mensagem começa " "com !")
-
         return
 
-    # --------------------------------------------------------
-    # QUEM DEVERIA ESCREVER NESTE CANAL?
-    # --------------------------------------------------------
+    # ========================================================
+    # MENÇÕES POR NOME DO PERSONAGEM
+    # ========================================================
+
+    character_mentions = await get_scene_character_mentions(
+        message.guild,
+        message.channel,
+    )
+
+    original_content = message.content or ""
+
+    processed_content = replace_character_mentions(
+        original_content,
+        character_mentions,
+    )
+
+    if processed_content != original_content:
+        debug_log(
+            "Menções de personagem convertidas. "
+            f"Original={original_content!r} | "
+            f"Processado={processed_content!r}"
+        )
+
+    # ========================================================
+    # DESCOBRE QUEM É O JOGADOR DO CANAL
+    # ========================================================
 
     expected_player_id = get_expected_player_id(message.channel)
 
-    debug_log(f"Jogador esperado neste canal: " f"{expected_player_id}")
-
-    debug_log(f"Autor real: " f"{message.author.id}")
-
-    # --------------------------------------------------------
-    # NÃO É O JOGADOR DO CANAL
-    # --------------------------------------------------------
-
-    if expected_player_id is None:
-        debug_log(
-            "Este canal não possui " "jogador esperado " "(provavelmente action)."
+    # Narrador / canal action / outro usuário.
+    if expected_player_id is None or message.author.id != expected_player_id:
+        await mirror_legacy_message(
+            message,
+            content_override=(processed_content),
         )
 
-        debug_log("Usando espelhamento legado.")
-
-        await mirror_legacy_message(message)
-
         return
 
-    if message.author.id != expected_player_id:
-        debug_log("Autor NÃO corresponde " "ao jogador esperado.")
-
-        debug_log("Usando espelhamento legado.")
-
-        await mirror_legacy_message(message)
-
-        return
-
-    debug_log("SUCESSO: autor corresponde " "ao jogador esperado.")
-
-    # --------------------------------------------------------
-    # PERFIL
-    # --------------------------------------------------------
+    # ========================================================
+    # PERSONAGEM DO AUTOR
+    # ========================================================
 
     (
         character_name,
@@ -783,177 +779,130 @@ async def mirror_scene_message(
     )
 
     if not character_name:
-        debug_log("ERRO: não foi possível " "obter o nome do personagem.")
-
-        debug_log("Mensagem original será " "preservada.")
-
-        await mirror_legacy_message(message)
-
-        return
-
-    debug_log(f"Nome que será usado " f"no webhook: " f"{character_name!r}")
-
-    # --------------------------------------------------------
-    # CONTEÚDO
-    # --------------------------------------------------------
-
-    original_content = message.content or ""
-
-    debug_log(f"Conteúdo recebido: " f"{original_content!r}")
-
-    if not original_content.strip() and not message.attachments:
-        debug_log("Mensagem sem texto " "e sem anexo.")
-
-        await mirror_legacy_message(message)
+        await mirror_legacy_message(
+            message,
+            content_override=(processed_content),
+        )
 
         return
 
-    # --------------------------------------------------------
+    if not processed_content.strip() and not message.attachments:
+        await mirror_legacy_message(
+            message,
+            content_override=(processed_content),
+        )
+
+        return
+
+    # ========================================================
     # ANEXOS
-    # --------------------------------------------------------
+    # ========================================================
 
     attachment_payloads = await read_attachment_payloads(message)
 
     if attachment_payloads is None:
-        debug_log("Falha ao preparar anexos.")
-
-        debug_log("Mensagem original será " "preservada.")
-
-        await mirror_legacy_message(message)
+        await mirror_legacy_message(
+            message,
+            content_override=(processed_content),
+        )
 
         return
 
-    # --------------------------------------------------------
-    # PUBLICAÇÃO NO CANAL DE ORIGEM
-    # --------------------------------------------------------
-
-    debug_log("INICIANDO publicação no " "CANAL DE ORIGEM.")
+    # ========================================================
+    # PUBLICA NO CANAL DE ORIGEM
+    # ========================================================
 
     try:
         source_webhook_message = await send_as_character(
             message.channel,
-            original_content,
+            processed_content,
             character_name,
             character_avatar,
             attachment_payloads,
         )
 
-        debug_log("SUCESSO: mensagem webhook " "publicada no canal de origem.")
-
-        debug_log(f"Webhook message ID: " f"{source_webhook_message.id}")
-
     except Exception as error:
         logger.exception(
             "Não foi possível publicar "
             "a mensagem como personagem "
-            "no canal de origem."
+            "no canal de origem %s: %s",
+            message.channel.id,
+            error,
         )
 
-        debug_log(
-            f"ERRO AO PUBLICAR NA ORIGEM: " f"{type(error).__name__}: " f"{error}"
+        await mirror_legacy_message(
+            message,
+            content_override=(processed_content),
         )
-
-        debug_log("Mensagem original NÃO será " "apagada.")
-
-        await mirror_legacy_message(message)
 
         return
 
-    # --------------------------------------------------------
-    # APAGAR ORIGINAL
-    # --------------------------------------------------------
-
-    debug_log(f"Tentando apagar mensagem " f"original ID={message.id}")
+    # ========================================================
+    # APAGA ORIGINAL
+    # ========================================================
 
     try:
         await message.delete()
 
-        debug_log("SUCESSO: mensagem original " "apagada.")
-
-    except Exception as error:
-        logger.exception("Não foi possível apagar " "a mensagem original.")
-
-        debug_log(f"ERRO AO APAGAR ORIGINAL: " f"{type(error).__name__}: " f"{error}")
-
-        debug_log("Tentando apagar a mensagem " "criada pelo webhook.")
+    except Exception:
+        logger.exception(
+            "Não foi possível apagar " "a mensagem original %s.",
+            message.id,
+        )
 
         try:
-            await source_webhook_message.delete()
+            if source_webhook_message is not None:
+                await source_webhook_message.delete()
 
-            debug_log("Mensagem webhook removida " "para evitar duplicação.")
-
-        except Exception as delete_error:
-            logger.exception("Também não foi possível " "remover a mensagem webhook.")
-
-            debug_log(
-                f"ERRO ao remover webhook: "
-                f"{type(delete_error).__name__}: "
-                f"{delete_error}"
+        except Exception:
+            logger.exception(
+                "Também não foi possível " "remover a mensagem webhook " "duplicada."
             )
 
-        await mirror_legacy_message(message)
+        await mirror_legacy_message(
+            message,
+            content_override=(processed_content),
+        )
 
         return
 
-    # --------------------------------------------------------
-    # CANAIS DA CENA
-    # --------------------------------------------------------
+    # ========================================================
+    # ESPELHA NOS OUTROS CANAIS
+    # ========================================================
 
     linked_channels = get_scene_channels(
         message.guild,
         message.channel,
     )
 
-    debug_log(f"Total de canais da cena: " f"{len(linked_channels)}")
-
-    for linked_channel in linked_channels:
-        debug_log(
-            f"Canal da cena encontrado: "
-            f"#{linked_channel.name} "
-            f"| ID={linked_channel.id}"
-        )
-
-    # --------------------------------------------------------
-    # ESPELHAMENTO
-    # --------------------------------------------------------
-
     for channel in linked_channels:
         if channel.id == message.channel.id:
-            debug_log(
-                f"Ignorando #{channel.name} "
-                "no espelhamento porque "
-                "é o canal de origem."
-            )
-
             continue
-
-        debug_log(f"Publicando como personagem " f"em #{channel.name}")
 
         try:
             await send_as_character(
                 channel,
-                original_content,
+                processed_content,
                 character_name,
                 character_avatar,
                 attachment_payloads,
             )
 
-            debug_log(f"SUCESSO em " f"#{channel.name}")
-
         except Exception as error:
-            logger.exception("Falha ao publicar personagem " "no canal espelhado.")
-
-            debug_log(
-                f"ERRO em " f"#{channel.name}: " f"{type(error).__name__}: " f"{error}"
+            logger.exception(
+                "Falha ao publicar personagem "
+                "no canal espelhado. "
+                "origem=%s destino=%s erro=%s",
+                message.channel.id,
+                channel.id,
+                error,
             )
 
-            debug_log("Tentando fallback normal.")
-
-            fallback_content = f"**{character_name}**\n" f"{original_content}"
+            fallback_content = f"**{character_name}**\n" f"{processed_content}"
 
             fallback_kwargs = {
                 "content": fallback_content,
-                "allowed_mentions": (discord.AllowedMentions.none()),
+                "allowed_mentions": (SCENE_ALLOWED_MENTIONS),
             }
 
             if attachment_payloads:
@@ -962,21 +911,8 @@ async def mirror_scene_message(
             try:
                 await channel.send(**fallback_kwargs)
 
-                debug_log(f"Fallback enviado " f"com sucesso em " f"#{channel.name}")
-
-            except Exception as fallback_error:
+            except Exception:
                 logger.exception(
                     "Também falhou o fallback " "no canal %s.",
                     channel.id,
                 )
-
-                debug_log(
-                    f"FALHA TOTAL em "
-                    f"#{channel.name}: "
-                    f"{type(fallback_error).__name__}: "
-                    f"{fallback_error}"
-                )
-
-    debug_log("PROCESSAMENTO DA MENSAGEM " "CONCLUÍDO.")
-
-    debug_log("==================================================")
