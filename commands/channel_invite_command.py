@@ -899,23 +899,33 @@ class SceneInviteView(View):
 
                 return
 
-            # Limite somente de cenas por jogador.
-            active_scene_count = count_active_scenes_for_member(
-                guild,
-                invited.id,
+            # Convites administrativos podem ignorar
+            # o limite normal de 3 cenas.
+            ignore_scene_limit = bool(
+                payload.get(
+                    "ignore_scene_limit",
+                    False,
+                )
             )
 
-            if active_scene_count >= MAX_ACTIVE_SCENES_PER_PLAYER:
+            if not ignore_scene_limit:
 
-                await interaction.response.send_message(
-                    f"Você já está no limite de "
-                    f"{MAX_ACTIVE_SCENES_PER_PLAYER} "
-                    "cenas ativas.",
-                    ephemeral=True,
-                    delete_after=5,
+                active_scene_count = count_active_scenes_for_member(
+                    guild,
+                    invited.id,
                 )
 
-                return
+                if active_scene_count >= MAX_ACTIVE_SCENES_PER_PLAYER:
+
+                    await interaction.response.send_message(
+                        f"Você já está no limite de "
+                        f"{MAX_ACTIVE_SCENES_PER_PLAYER} "
+                        "cenas ativas.",
+                        ephemeral=True,
+                        delete_after=5,
+                    )
+
+                    return
 
             (
                 guest_scene_channel,
@@ -965,8 +975,26 @@ class SceneInviteView(View):
 
             pinned_message = await get_primary_pinned_message(inviter_scene_channel)
 
+            # O Narrador pode ter enviado o convite,
+            # mas o responsável pela cena continua
+            # sendo o scene_owner original.
+            scene_owner_id = parse_int(scene_data.get("scene_owner"))
+
+            scene_owner_member = (
+                guild.get_member(scene_owner_id) if scene_owner_id is not None else None
+            )
+
+            responsible_member = (
+                scene_owner_member
+                if isinstance(
+                    scene_owner_member,
+                    discord.Member,
+                )
+                else inviter
+            )
+
             forwarded_content = build_forwarded_pin_content(
-                inviter,
+                responsible_member,
                 inviter_scene_channel,
                 pinned_message,
             )
